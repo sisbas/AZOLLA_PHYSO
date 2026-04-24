@@ -27,6 +27,9 @@ COPY src/ ./src/
 # Install Node.js dependencies
 RUN npm install
 
+# Install ts-node globally to run TypeScript directly
+RUN npm install -g ts-node
+
 # Build the frontend
 RUN npm run build
 
@@ -38,5 +41,5 @@ ENV NODE_ENV=production
 ENV PYTHONUNBUFFERED=1
 ENV PORT=7860
 
-# Start the server
-CMD ["node", "server.ts"]
+# Start the server using ts-node for TypeScript execution
+CMD ["ts-node", "server.ts"]
