@@ -23,9 +23,8 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      - name: Install frontend dependencies
+      - name: Install dependencies and build frontend
         run: |
-          cd frontend
           npm ci
           npm run build
 
