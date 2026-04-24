@@ -4,7 +4,7 @@ emoji: 🌱
 colorFrom: green
 colorTo: blue
 sdk: docker
-port: 7860
+app_port: 7860
 pinned: false
 license: mit
 ---
