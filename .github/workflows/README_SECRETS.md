@@ -39,9 +39,12 @@ organization-name/space-name
 2. Manuel olarak da **Actions** sekmesinden "Run workflow" butonu ile tetiklenebilir
 3. Workflow şunları yapar:
    - Repository'yi checkout eder
-   - Node.js kurar ve frontend'i build eder
+   - Node.js kurar ve frontend'i build eder (`npm run build`)
    - Python kurar ve bağımlılıkları yükler
-   - Hugging Face Spaces'e deploy eder
+   - Hugging Face Space'inizi git ile clone eder
+   - Tüm dosyaları Space'e kopyalar (`.git`, `hf_space` ve `.github` klasörleri hariç)
+   - Değişiklikleri commit edip Hugging Face'e push eder
+   - Hugging Face otomatik olarak Docker container'ı build eder ve uygulamayı başlatır
 
 ## Önemli Notlar
 
