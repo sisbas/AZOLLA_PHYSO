@@ -1,9 +1,10 @@
 FROM python:3.10-slim
 
 # Install Node.js and system dependencies for OpenCV
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-    apt-get install -y nodejs && \
-    apt-get install -y git libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender-dev libgomp1 && \
+RUN apt-get update && \
+    apt-get install -y curl ca-certificates gnupg && \
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y nodejs git libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender-dev libgomp1 && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -25,10 +26,7 @@ COPY config.json ./
 COPY src/ ./src/
 
 # Install Node.js dependencies
-RUN npm install
-
-# Install ts-node globally to run TypeScript directly
-RUN npm install -g ts-node
+RUN npm ci
 
 # Build the frontend
 RUN npm run build
@@ -41,5 +39,5 @@ ENV NODE_ENV=production
 ENV PYTHONUNBUFFERED=1
 ENV PORT=7860
 
-# Start the server using ts-node for TypeScript execution
-CMD ["ts-node", "server.ts"]
+# Start the server in production mode
+CMD ["npx", "tsx", "server.ts"]
