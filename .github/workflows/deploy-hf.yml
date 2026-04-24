@@ -28,14 +28,15 @@ jobs:
           npm ci
           npm run build
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
+      - name: Set up Python (using system Python to avoid Node.js 20 deprecation)
+        run: |
+          # Use system Python instead of setup-python action to avoid Node.js 20 warning
+          python3 --version
+          pip3 install --upgrade pip
 
       - name: Install Python dependencies
         run: |
-          pip install -r requirements.txt
+          pip3 install -r requirements.txt
 
       - name: Deploy to Hugging Face Spaces via Git
         env:
