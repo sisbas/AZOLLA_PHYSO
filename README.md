@@ -1,20 +1,51 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+---
+title: Azolla Early Stress Detection
+emoji: 🌱
+colorFrom: green
+colorTo: blue
+sdk: docker
+port: 7860
+pinned: false
+license: mit
+---
 
-# Run and deploy your AI Studio app
+# Azolla Early Stress Detection System
 
-This contains everything you need to run your app locally.
+An AI-powered system for early detection of stress in Azolla plants using computer vision and machine learning.
 
-View your app in AI Studio: https://ai.studio/apps/609744eb-69fc-4e28-b859-94b49823375c
+## Features
 
-## Run Locally
+- **Image Processing**: Advanced segmentation and analysis of Azolla fronds
+- **Stress Detection**: Early warning system for nutrient deficiency and environmental stress
+- **Time Series Analysis**: Track plant health over time with multi-image support
+- **Interactive Dashboard**: Real-time visualization of metrics and results
 
-**Prerequisites:**  Node.js
+## How to Use
 
+1. Upload images of Azolla plants (single or multiple for time series)
+2. The system will analyze the images using computer vision algorithms
+3. View detailed metrics including:
+   - Coverage percentage
+   - Mean stress score
+   - Frond count
+   - Early stress probability
+   - G/R ratio (Green/Red chlorophyll indicator)
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+## API Endpoints
+
+- `GET /api/health` - Health check
+- `POST /api/v1/predict/series` - Submit images for analysis
+- `GET /api/v1/tasks/:id/status` - Check task status
+- `GET /api/v1/tasks/:id/results` - Get analysis results
+
+## Configuration
+
+Edit `config.json` to customize processing parameters directly from the UI.
+
+## Local Development
+
+See [README_HUGGINGFACE.md](README_HUGGINGFACE.md) for detailed deployment instructions.
+
+## License
+
+MIT

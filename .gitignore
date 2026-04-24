@@ -1,8 +1,51 @@
+```
+# Environment
+.env
+.env.local
+.env.*
+
+# Dependencies
 node_modules/
-build/
+.venv/
+venv/
+__pycache__/
+.mypy_cache/
+.pytest_cache/
+.julia/
+zig*/
+julia-*/
+
+# Build artifacts
 dist/
+build/
+target/
 coverage/
-.DS_Store
+htmlcov/
+
+# Logs and temp files
 *.log
-.env*
-!.env.example
+*.tmp
+*.swp
+
+# Editors
+.vscode/
+.idea/
+
+# Compiled files
+*.pyc
+*.class
+*.o
+*.exe
+*.dll
+*.so
+*.a
+*.obj
+*.out
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Tests and coverage
+.coverage
+```
