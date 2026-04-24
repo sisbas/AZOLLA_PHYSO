@@ -36,7 +36,7 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          pip3 install -r requirements.txt
+          pip3 install -r backend/requirements.txt
 
       - name: Deploy to Hugging Face Spaces via Git
         env:
