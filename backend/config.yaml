@@ -1,0 +1,85 @@
+pipeline:
+  random_seed: 42
+  pixel_size_mm: 0.048
+  expected_fron_diameter_mm: 4.5
+
+standardization:
+  gamma: 2.2
+  glare_v_thresh: 220
+  glare_s_thresh: 40
+  denoise_weight: 0.02
+
+segmentation:
+  min_area: 150
+  close_radius: 2
+  threshold_tolerance: 2.0
+
+mask_optimizer:
+  min_area: 150
+  max_hole_size: 300
+  morph_disk_radius: 2
+  edge_refinement: true
+  qc_min_coverage: 0.02
+  qc_max_hole_fraction: 0.15
+  qc_min_solidity: 0.4
+
+feature_extraction:
+  glcm_levels: 64
+  glcm_distances: [1]
+  glcm_angles: [0.0, 0.7854, 1.5708, 2.3562]
+
+decision:
+  alpha: 0.05
+  early_weights:
+    rg_ratio_pct: 0.40
+    mean_g_pct: 0.30
+    glcm_entropy_pct: 0.20
+    coverage_pct: 0.10
+  late_coverage_drop: -0.30
+  min_concordant_features: 2
+  prob_threshold: 0.45
+
+pseudocolor:
+  colormap: "stress_sequential"
+  alpha_overlay: 0.55
+  z_threshold: 1.8
+  spatial_smooth_sigma: 1.2
+  score_range: [0.0, 3.0]
+
+biomass_isolation:
+  bg_mode: "transparent"
+  export_formats: ["png", "tif", "npz"]
+  dpi: 300
+
+frond_segmenter:
+  peak_threshold_rel: 0.25
+  merge_boundary_ratio: 0.6
+  compactness: 0.5
+  contour_refine: true
+  min_distance_px: 7
+  distance_smooth_sigma: 1.2
+  h_maxima_thresh: 1.5
+
+unet_segmenter:
+  enabled: false
+  weights_path: "backend/models/azolla_unet.pth"
+  use_gpu: true
+
+dl_fallback:
+  enabled: true
+  model_name: "cyto2"
+  cellprob_threshold: -1.0
+  flow_threshold: 0.4
+  min_area_px: 80
+  max_area_px: 8000
+  use_gpu: true
+
+validation:
+  n_splits: 5
+  bootstrap_iters: 500
+  time_series_cv: true
+
+output:
+  base_dir: "./results"
+  experiment_id: "azolla_exp_001"
+  media_prefix: "/media"

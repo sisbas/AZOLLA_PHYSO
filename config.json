@@ -1,0 +1,38 @@
+{
+  "pipeline": {
+    "random_seed": 42,
+    "pixel_size_mm": 0.05,
+    "expected_frond_diameter_mm": 1.2
+  },
+  "standardization": {
+    "gamma": 2.2,
+    "white_balance_target": [200, 200, 200],
+    "denoise_weight": 0.1
+  },
+  "segmentation": {
+    "exg_method": "normalize",
+    "otsu_safety_factor": 1.1,
+    "coverage_threshold": 0.05
+  },
+  "decision": {
+    "z_score_threshold": 2.0,
+    "fdr_alpha": 0.05,
+    "early_phase_limit": 24
+  },
+  "frond_segmenter": {
+    "watershed_compactness": 0.001,
+    "min_frond_area_px": 50
+  },
+  "dl_fallback": {
+    "enabled": false,
+    "threshold": 0.6
+  },
+  "azolla_processor": {
+    "hsv_lower": [35, 40, 40],
+    "hsv_upper": [85, 255, 255],
+    "morph_kernel_size": [5, 5],
+    "clahe_clip_limit": 2.0,
+    "clahe_grid_size": [8, 8],
+    "overlay_opacity": 0.6
+  }
+}
