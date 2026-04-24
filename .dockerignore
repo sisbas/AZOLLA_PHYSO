@@ -1,0 +1,16 @@
+node_modules
+npm-debug.log
+.git
+.gitignore
+*.md
+!README.md
+.env*
+!.env.example
+dist
+build
+coverage
+__pycache__
+*.pyc
+results
+backend/lib
+.DS_Store
