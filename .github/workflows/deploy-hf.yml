@@ -38,8 +38,28 @@ jobs:
         run: |
           pip install -r requirements.txt
 
-      - name: Deploy to Hugging Face Spaces
-        uses: huggingface/action-spaces-sync@v1
-        with:
-          hf_token: ${{ secrets.HF_TOKEN }}
-          space_id: ${{ secrets.HF_SPACE_ID }}
+      - name: Deploy to Hugging Face Spaces via Git
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE_ID: ${{ secrets.HF_SPACE_ID }}
+        run: |
+          # Extract username and space name from space_id
+          SPACE_NAME=$(echo $HF_SPACE_ID | cut -d'/' -f2)
+          
+          # Clone the Hugging Face Space
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          git clone https://$HF_TOKEN@huggingface.co/spaces/$HF_SPACE_ID hf_space
+          
+          # Copy files to the Space (excluding .git folder)
+          rsync -av --delete \
+            --exclude='.git' \
+            --exclude='hf_space' \
+            --exclude='.github' \
+            ./ hf_space/
+          
+          # Commit and push
+          cd hf_space
+          git add .
+          git diff --cached --quiet || git commit -m "Deploy from GitHub: ${{ github.sha }}"
+          git push https://$HF_TOKEN@huggingface.co/spaces/$HF_SPACE_ID main || true
