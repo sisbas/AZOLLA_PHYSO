@@ -34,6 +34,14 @@ interface Task {
 
 const tasks: Record<string, Task> = {};
 
+// Logger helper
+const logger = {
+  info: (msg: string) => console.log(`[INFO] ${new Date().toISOString()} - ${msg}`),
+  warn: (msg: string) => console.warn(`[WARN] ${new Date().toISOString()} - ${msg}`),
+  error: (msg: string, ...args: any[]) => console.error(`[ERROR] ${new Date().toISOString()} - ${msg}`, ...args),
+  debug: (msg: string) => process.env.DEBUG ? console.log(`[DEBUG] ${new Date().toISOString()} - ${msg}`) : undefined
+};
+
 async function startServer() {
   const app = express();
   // Hugging Face Spaces uses PORT environment variable (default 7860)
@@ -42,9 +50,13 @@ async function startServer() {
   app.use(express.json({ limit: '500mb' }));
   app.use(express.urlencoded({ extended: true, limit: '500mb' }));
 
-  // Request logger
+  // Request logger with more detail
   app.use((req, res, next) => {
-    console.log(`${req.method} ${req.url}`);
+    const start = Date.now();
+    res.on('finish', () => {
+      const duration = Date.now() - start;
+      logger.info(`${req.method} ${req.url} ${res.statusCode} - ${duration}ms`);
+    });
     next();
   });
 
@@ -197,6 +209,8 @@ if (process.env.NODE_ENV !== "production" && process.env.ENABLE_RUNTIME_PIP === 
 
 async function runPythonPipeline(imageBuffer: Buffer, filename: string): Promise<any> {
   return new Promise((resolve, reject) => {
+    logger.info(`Starting Python pipeline for ${filename}`);
+    
     // Use explicit python3 path and set working directory for proper module resolution
     const python = spawn("python3", ["backend/bridge.py"], {
       cwd: process.cwd(),
@@ -206,13 +220,12 @@ async function runPythonPipeline(imageBuffer: Buffer, filename: string): Promise
     let errorOutput = "";
 
     python.on("error", (err) => {
-      console.error("Failed to start Python process:", err);
+      logger.error(`Failed to start Python process: ${err.message}`);
       reject(new Error(`Python başlatılamadı: ${err.message}`));
     });
 
     python.stdin.on("error", (err) => {
-      console.error("Python stdin error:", err);
-      // We don't reject here if already rejected, but this prevents crash
+      logger.error(`Python stdin error: ${err.message}`);
     });
 
     const base64Image = imageBuffer.toString('base64');
@@ -224,7 +237,7 @@ async function runPythonPipeline(imageBuffer: Buffer, filename: string): Promise
       const currentConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
       processorConfig = currentConfig.azolla_processor || {};
     } catch (e) {
-      console.error("Config read error, using defaults");
+      logger.warn("Config read error, using defaults");
     }
 
     const inputData = JSON.stringify({
@@ -238,23 +251,32 @@ async function runPythonPipeline(imageBuffer: Buffer, filename: string): Promise
     });
 
     python.stderr.on("data", (data) => {
-      errorOutput += data.toString();
+      const stderrStr = data.toString();
+      errorOutput += stderrStr;
+      // Log Python stderr as info (it might just be logging)
+      logger.debug(`Python stderr: ${stderrStr.trim()}`);
     });
 
     python.on("close", (code) => {
       if (code !== 0) {
         const errMsg = errorOutput || `Python script failed with code ${code}`;
-        console.error(`Python error [${filename}]:`, errMsg);
+        logger.error(`Python error [${filename}]: ${errMsg}`);
         return reject(new Error(errMsg));
       }
       try {
+        if (!output.trim()) {
+          throw new Error("Python script returned empty output");
+        }
         const result = JSON.parse(output);
         if (result.status === "error") {
+          logger.error(`Python processing error: ${result.message}`);
           return reject(new Error(result.message));
         }
+        logger.info(`Python pipeline completed for ${filename}`);
         resolve(result);
-      } catch (e) {
-        console.error("Failed to parse Python output:", output);
+      } catch (e: any) {
+        logger.error(`Failed to parse Python output: ${e.message}`);
+        logger.error(`Raw output: ${output.substring(0, 500)}`);
         reject(new Error(`Görüntü işleme çıktısı anlaşılamadı: ${output.substring(0, 100)}`));
       }
     });
@@ -263,11 +285,12 @@ async function runPythonPipeline(imageBuffer: Buffer, filename: string): Promise
       if (python.stdin && python.stdin.writable) {
         python.stdin.write(inputData);
         python.stdin.end();
+        logger.debug(`Sent ${inputData.length} bytes to Python process`);
       } else {
         reject(new Error("Python stdin is not writable or already closed"));
       }
     } catch (writeErr: any) {
-      console.error("Critical write error to python:", writeErr);
+      logger.error(`Critical write error to python: ${writeErr.message}`);
       reject(new Error(`Python process write failure: ${writeErr.message}`));
     }
   });
@@ -276,54 +299,106 @@ async function runPythonPipeline(imageBuffer: Buffer, filename: string): Promise
 async function processImages(taskId: string, files: Express.Multer.File[]) {
   const results = [];
   const total = files.length;
+  let processingErrors = [];
 
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
     
     try {
       tasks[taskId].progress = Math.round((i / total) * 100);
+      
+      logger.info(`Processing file ${i+1}/${total}: ${file.originalname}`);
+      
       const pythonRes = await runPythonPipeline(file.buffer, file.originalname);
       
       results.push({
+        filename: file.originalname,
         timestamp: pythonRes.timestamp,
         status: "optimized",
         method: "AzollaProcessor-v1",
         errors: [],
         metrics: {
-          coverage_pct: pythonRes.metrics.area_ratio,
-          mean_stress_score: 1.0 - (pythonRes.metrics.g_ratio / 2.0), // Simplified stress inverse of G/R
-          frond_count: Math.floor(pythonRes.metrics.area_pixels / 400),
-          early_stress_prob: pythonRes.confidence < 0.5 ? 0.8 : 0.1,
-          g_ratio: pythonRes.metrics.g_ratio,
-          pixels: pythonRes.metrics.area_pixels
+          coverage_pct: pythonRes.metrics?.area_ratio || 0,
+          mean_stress_score: 1.0 - ((pythonRes.metrics?.g_ratio || 0) / 2.0),
+          frond_count: Math.floor((pythonRes.metrics?.area_pixels || 0) / 400),
+          early_stress_prob: (pythonRes.confidence || 0) < 0.5 ? 0.8 : 0.1,
+          g_ratio: pythonRes.metrics?.g_ratio || 0,
+          pixels: pythonRes.metrics?.area_pixels || 0
         },
         decision: {
-          status: pythonRes.metrics.g_ratio < 1.2 ? "STRESSED" : "HEALTHY",
-          rationale: pythonRes.metrics.g_ratio < 1.2 ? "G/R oranı düşük - Azot eksikliği veya stres belirtisi." : "Normal klorofil aktivitesi.",
+          status: (pythonRes.metrics?.g_ratio || 0) < 1.2 ? "STRESSED" : "HEALTHY",
+          rationale: (pythonRes.metrics?.g_ratio || 0) < 1.2 
+            ? "G/R oranı düşük - Azot eksikliği veya stres belirtisi." 
+            : "Normal klorofil aktivitesi.",
         },
         image_urls: {
           rgb: pythonRes.processed_image, 
-          pseudocolor: pythonRes.mask_image, // Using mask as pseudo-color for segment highlight
+          pseudocolor: pythonRes.mask_image,
           isolated: pythonRes.processed_image,
-        }
+        },
+        confidence: pythonRes.confidence || 0,
+        context: pythonRes.context || {}
       });
+      
+      logger.info(`Successfully processed ${file.originalname}`);
+      
     } catch (err: any) {
-      console.error(`Error processing file ${file.originalname}:`, err);
-      // Fallback or skip
+      logger.error(`Error processing file ${file.originalname}:`, err);
+      
+      // Add detailed error information
+      const errorInfo = {
+        filename: file.originalname,
+        error: err.message,
+        stack: process.env.NODE_ENV === 'development' ? err.stack : undefined,
+        timestamp: new Date().toISOString()
+      };
+      
+      processingErrors.push(errorInfo);
+      
+      // Still add a failed result entry
+      results.push({
+        filename: file.originalname,
+        status: "failed",
+        error: errorInfo,
+        timestamp: new Date().toISOString()
+      });
     }
 
     tasks[taskId].progress = Math.round(((i + 1) / total) * 100);
   }
 
-  if (results.length === 0 && files.length > 0) {
+  // Check if all files failed
+  if (results.filter(r => r.status === "failed").length === total && total > 0) {
     tasks[taskId].status = "failed";
-    tasks[taskId].error = "Hiçbir görüntü başarıyla işlenemedi. Sunucu üzerindeki Python bağımlılıkları (OpenCV vb.) eksik olabilir. Lütfen günlükleri kontrol edin.";
-  } else {
+    tasks[taskId].error = `Hiçbir görüntü başarıyla işlenemedi (${total} dosya başarısız).`;
     tasks[taskId].results = {
       experiment_id: uuidv4(),
       timeline: results,
+      errors: processingErrors,
+      summary: {
+        total: total,
+        successful: 0,
+        failed: total
+      }
     };
-    tasks[taskId].status = "completed";
+    logger.error(`Task ${taskId} failed: All ${total} files failed processing`);
+  } else {
+    const successCount = results.filter(r => r.status !== "failed").length;
+    const failedCount = results.filter(r => r.status === "failed").length;
+    
+    tasks[taskId].results = {
+      experiment_id: uuidv4(),
+      timeline: results,
+      errors: processingErrors.length > 0 ? processingErrors : undefined,
+      summary: {
+        total: total,
+        successful: successCount,
+        failed: failedCount
+      }
+    };
+    tasks[taskId].status = failedCount > 0 ? "completed_with_errors" : "completed";
+    
+    logger.info(`Task ${taskId} completed: ${successCount}/${total} successful`);
   }
 }
 
