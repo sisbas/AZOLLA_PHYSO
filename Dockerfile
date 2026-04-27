@@ -39,5 +39,8 @@ ENV NODE_ENV=production
 ENV PYTHONUNBUFFERED=1
 ENV PORT=7860
 
+# Ensure Python can find backend modules
+ENV PYTHONPATH=/app:/app/backend
+
 # Start the server in production mode
 CMD ["npx", "tsx", "server.ts"]
