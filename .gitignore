@@ -1,39 +1,32 @@
-# Binary image files - should not be committed to git
-results/**/*.png
-results/**/*.jpg
-results/**/*.jpeg
-results/**/*.bmp
-results/**/*.tiff
-
-# Test outputs
-*.png
-*.jpg
-*.jpeg
-
-# Python cache
+```
+# Python
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
+*.pyc
+*.pyo
+*.pyd
 
-# Virtual environments
-venv/
-env/
-.venv/
+# Logs and temp files
+*.log
+*.tmp
 
-# IDE
+# Environment
+.env
+.env.local
+*.env.*
+
+# Editors
 .vscode/
 .idea/
 *.swp
 *.swo
 
-# OS
-.DS_Store
-Thumbs.db
+# Dependencies
+.venv/
+venv/
+node_modules/
 
-# Logs
-*.log
-
-# Temporary files
-tmp/
-temp/
+# Build artifacts
+dist/
+build/
+target/
+```
