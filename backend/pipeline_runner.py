@@ -57,13 +57,14 @@ class AzollaPipeline:
         out_dir = self.output_base / experiment_id / timestamp.replace(":", "-")
         
         all_errors = []
+        segmentation_outputs = {}
 
         # 1. Standardization
         std_res = self.std.process(img_rgb)
         all_errors.extend(std_res.errors)
         
-        # 2. & 3. Segmentation & Optimization
-        raw_mask, seg_qc = self.seg.process(std_res.img_clean)
+        # 2. & 3. Segmentation & Optimization (now returns extra outputs)
+        raw_mask, seg_qc, segmentation_outputs = self.seg.process(std_res.img_clean)
         all_errors.extend(seg_qc.errors)
         
         opt_mask, opt_qc, opt_status = self.opt.process(raw_mask)
@@ -88,7 +89,7 @@ class AzollaPipeline:
         # 7. Isolation
         isolated = self.iso.isolate(img_rgb, opt_mask)
         
-        # Compile results
+        # Compile results - merge segmentation outputs with metrics
         results = {
             "timestamp": timestamp,
             "metrics": {
@@ -98,6 +99,7 @@ class AzollaPipeline:
                 **ps_metrics,
                 **{k: v for k, v in feature_record.__dict__.items() if k != 'errors'}
             },
+            "segmentation": segmentation_outputs,  # Add detailed segmentation outputs
             "status": opt_status,
             "errors": all_errors,
             "image_paths": {
