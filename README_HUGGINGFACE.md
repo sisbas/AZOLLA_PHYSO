@@ -61,6 +61,8 @@ bash scripts/deploy_to_hf_space.sh YOUR_USERNAME/YOUR_SPACE_NAME main
 
 This avoids the common issue where files are committed locally but never pushed to the Space repo.
 
+=======
+
 ### Troubleshooting: "No application file"
 
 If your Space shows **"No application file"** and there are no build logs:
