@@ -1,6 +1,6 @@
 # filepath: backend/core/errors.py
 from dataclasses import dataclass, field, asdict
-from typing import Optional, List, Dict, Any
+from typing import Optional, Dict, Any, List
 from enum import Enum
 import traceback
 from datetime import datetime
