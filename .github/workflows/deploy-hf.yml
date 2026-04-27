@@ -46,11 +46,15 @@ jobs:
           # Extract username and space name from space_id
           SPACE_NAME=$(echo $HF_SPACE_ID | cut -d'/' -f2)
           
-          # Clone the Hugging Face Space
+          # Configure git credentials to avoid password prompt
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git config --global user.name "github-actions[bot]"
+          git config --global credential.helper store
+          echo "https://oauth2:$HF_TOKEN@huggingface.co" > ~/.git-credentials
+          
+          # Clone the Hugging Face Space
           rm -rf hf_space
-          git clone https://$HF_TOKEN@huggingface.co/spaces/$HF_SPACE_ID hf_space
+          git clone https://huggingface.co/spaces/$HF_SPACE_ID hf_space
           
           # Copy files to the Space (excluding .git folder)
           rsync -av --delete \
@@ -66,4 +70,4 @@ jobs:
           cd hf_space
           git add .
           git diff --cached --quiet || git commit -m "Deploy from GitHub: ${{ github.sha }}"
-          git push https://$HF_TOKEN@huggingface.co/spaces/$HF_SPACE_ID main
+          git push https://huggingface.co/spaces/$HF_SPACE_ID main
