@@ -9,6 +9,8 @@ from .biomass_isolation import BiomassIsolationModule
 from .frond_segmenter import FrondSegmenterModule
 from .dl_fallback import DLFallbackModule
 from .validation import ValidationModule
+from .image_preprocessor import ImagePreprocessor, preprocess_image, PreprocessingMetadata, PreprocessingResult
+from .azolla_isolator import AzollaIsolator, isolate_azolla, IsolationResult, SegmentationMetrics
 
 __all__ = [
     "StandardizationModule",
@@ -23,4 +25,13 @@ __all__ = [
     "FrondSegmenterModule",
     "DLFallbackModule",
     "ValidationModule",
+    # FAZ 1 Modülleri
+    "ImagePreprocessor",
+    "preprocess_image",
+    "PreprocessingMetadata",
+    "PreprocessingResult",
+    "AzollaIsolator",
+    "isolate_azolla",
+    "IsolationResult",
+    "SegmentationMetrics",
 ]
