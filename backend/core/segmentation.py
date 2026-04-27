@@ -3,10 +3,11 @@ import numpy as np
 import logging
 import cv2
 import base64
-from typing import Dict, Any, Tuple, List
+from typing import Dict, Any, Tuple, List, Optional
 from dataclasses import dataclass
-from skimage.filters import threshold_otsu
-from skimage.morphology import binary_closing, disk, remove_small_objects
+from skimage.filters import threshold_otsu, threshold_li
+from skimage.morphology import binary_closing, disk, remove_small_objects, binary_opening
+from skimage.exposure import equalize_hist, rescale_intensity
 
 from .errors import format_error, ProcessingContext, PipelineStepError
 
@@ -21,16 +22,19 @@ class SegQC:
     hsv_threshold_used: bool
     gr_ratio: float
     health_score: float
+    contrast_score: float
+    method_used: str
 
 class SegmentationModule:
     """
     Hibrit segmentasyon: ExG + HSV + TREx/ExR indeksleri.
     Otomatik parametre optimizasyonu ile kullanıcı müdahalesini minimize eder.
+    Çoklu fallback stratejisi ile düşük kontrastlı görüntüleri de işler.
     Korelasyon ≠ nedensellik. Bu skor erken uyarı indeksidir; biyokimyasal validasyon gerektirir.
     """
     def __init__(self, config: Dict[str, Any]):
         self.cfg = config.get('segmentation', {})
-        self.min_area = self.cfg.get('min_area', 100)
+        self.min_area = self.cfg.get('min_area', 50)  # Düşürüldü
         self.close_radius = self.cfg.get('close_radius', 3)
         # HSV ranges for fern fronds (optimized for Azolla)
         self.hsv_min = np.array(self.cfg.get('hsv_min', [35, 40, 40]))
@@ -39,6 +43,8 @@ class SegmentationModule:
         self.adaptive_hsv = self.cfg.get('adaptive_hsv', True)
         self.trex_weight = self.cfg.get('trex_weight', 0.3)
         self.exg_weight = self.cfg.get('exg_weight', 0.7)
+        self.auto_gamma = self.cfg.get('auto_gamma', True)
+        self.fallback_strategies = self.cfg.get('fallback_strategies', True)
 
     def calculate_exg(self, img: np.ndarray) -> np.ndarray:
         """ExG = 2G - R - B (normalized)."""
@@ -50,6 +56,13 @@ class SegmentationModule:
         except Exception as e:
             logging.error(f"ExG calculation failed: {str(e)}")
             raise
+
+    def calculate_exg_enhanced(self, img: np.ndarray) -> np.ndarray:
+        """Geliştirilmiş ExG: Contrast stretching sonrası."""
+        exg = self.calculate_exg(img)
+        # Rescale to full range for better thresholding
+        exg_rescaled = rescale_intensity(exg, out_range=(0, 1))
+        return exg_rescaled
 
     def calculate_trex(self, r: np.ndarray, g: np.ndarray, b: np.ndarray) -> np.ndarray:
         """TREx = (R - G) / (R + G + B + epsilon) * 128 + 128. Yüksek değer stres göstergesi."""
@@ -76,6 +89,19 @@ class SegmentationModule:
             'ExR': exr,
             'GR': gr_ratio
         }
+
+    def estimate_gamma(self, img: np.ndarray) -> float:
+        """Otomatik gamma tahmini - histogram analizine göre."""
+        gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        mean_val = np.mean(gray)
+        
+        # Eğer görüntü çok karanlıksa gamma < 1, çok aydınlıksa gamma > 1
+        if mean_val < 80:
+            return 0.8  # Parlaklığı artır
+        elif mean_val > 180:
+            return 1.5  # Parlaklığı azalt
+        else:
+            return 1.2  # Normal düzeltme
 
     def auto_adjust_hsv(self, hsv: np.ndarray, mask_initial: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """Otomatik HSV threshold optimizasyonu - kullanıcı müdahalesini minimize eder."""
@@ -125,10 +151,11 @@ class SegmentationModule:
         """
         Process image and return mask, QC metrics, and additional outputs for API response.
         Returns: (mask, qc, extra_outputs) where extra_outputs contains base64 encoded images and indices
+        Çoklu fallback stratejisi: ExG -> HSV -> LAB -> Combined
         """
         errors = []
         mask = np.zeros(img_clean.shape[:2], dtype=bool)
-        qc = SegQC(0.0, 0.0, False, [], 0.0, 0.0, False, 0.0, 0.0)
+        qc = SegQC(0.0, 0.0, False, [], 0.0, 0.0, False, 0.0, 0.0, 0.0, "none")
         extra_outputs = {}
         
         try:
@@ -145,8 +172,16 @@ class SegmentationModule:
             else:
                 img_uint8 = img_clean
             
+            # Calculate contrast score for QC
+            gray = cv2.cvtColor(img_uint8, cv2.COLOR_RGB2GRAY)
+            contrast_score = float(np.std(gray))
+            
             # 1. Gamma correction for lighting normalization
-            img_gamma = self.apply_gamma_correction(img_uint8, gamma=1.2)
+            if self.auto_gamma:
+                gamma = self.estimate_gamma(img_uint8)
+                img_gamma = self.apply_gamma_correction(img_uint8, gamma=gamma)
+            else:
+                img_gamma = self.apply_gamma_correction(img_uint8, gamma=1.2)
             
             # 2. Calculate vegetation indices
             r = img_gamma[:,:,2].astype(np.float32)
@@ -154,38 +189,110 @@ class SegmentationModule:
             b = img_gamma[:,:,0].astype(np.float32)
             
             exg = self.calculate_exg(img_gamma)
+            exg_enhanced = self.calculate_exg_enhanced(img_gamma)
             trex = self.calculate_trex(r, g, b)
             exr = self.calculate_exr(r, g, b)
             indices = self.calculate_indices(r, g, b)
             
-            # 3. Initial ExG-based mask with Otsu
-            thresh_exg = threshold_otsu(exg)
-            mask_exg = exg > thresh_exg
+            # Initialize variables for tracking best method
+            best_mask = None
+            best_coverage = 0.0
+            method_used = "none"
             
-            # 4. HSV-based segmentation with adaptive thresholds
-            hsv = cv2.cvtColor(img_gamma, cv2.COLOR_RGB2HSV)
+            # STRATEGY 1: Enhanced ExG + Otsu (primary)
+            try:
+                thresh_exg = threshold_otsu(exg_enhanced)
+                mask_exg = exg_enhanced > thresh_exg
+                mask_exg = binary_opening(mask_exg, disk(2))
+                coverage_exg = np.mean(mask_exg) * 100
+                
+                if coverage_exg > best_coverage:
+                    best_mask = mask_exg.copy()
+                    best_coverage = coverage_exg
+                    method_used = "exg_otsu"
+                    thresh_exg_final = thresh_exg
+            except Exception as e:
+                logging.warning(f"ExG+Otsu failed: {str(e)}")
+                thresh_exg_final = 0.0
             
-            # Auto-adjust HSV thresholds based on initial mask
-            if self.adaptive_hsv:
-                hsv_min, hsv_max = self.auto_adjust_hsv(hsv, mask_exg.astype(np.uint8))
-                hsv_threshold_used = True
-            else:
-                hsv_min, hsv_max = self.hsv_min, self.hsv_max
-                hsv_threshold_used = False
+            # STRATEGY 2: HSV-based segmentation with adaptive thresholds
+            try:
+                hsv = cv2.cvtColor(img_gamma, cv2.COLOR_RGB2HSV)
+                
+                # Auto-adjust HSV thresholds based on initial mask
+                if self.adaptive_hsv and best_mask is not None:
+                    hsv_min, hsv_max = self.auto_adjust_hsv(hsv, best_mask.astype(np.uint8))
+                    hsv_threshold_used = True
+                else:
+                    hsv_min, hsv_max = self.hsv_min, self.hsv_max
+                    hsv_threshold_used = False
+                
+                mask_hsv = cv2.inRange(hsv, hsv_min, hsv_max)
+                mask_hsv = mask_hsv > 0
+                mask_hsv = binary_opening(mask_hsv, disk(2))
+                coverage_hsv = np.mean(mask_hsv) * 100
+                
+                # Use HSV if it gives better coverage or complements ExG
+                if coverage_hsv > best_coverage * 1.2:  # %20 daha iyi ise
+                    best_mask = mask_hsv.copy()
+                    best_coverage = coverage_hsv
+                    method_used = "hsv_adaptive"
+                elif best_mask is not None:
+                    # Combine: union of both masks with some logic
+                    mask_combined = np.logical_or(best_mask, mask_hsv)
+                    coverage_combined = np.mean(mask_combined) * 100
+                    if coverage_combined > best_coverage * 1.1:
+                        best_mask = mask_combined
+                        best_coverage = coverage_combined
+                        method_used = "exg_hsv_combined"
+            except Exception as e:
+                logging.warning(f"HSV segmentation failed: {str(e)}")
             
-            mask_hsv = cv2.inRange(hsv, hsv_min, hsv_max)
-            mask_hsv = mask_hsv > 0
+            # STRATEGY 3: Fallback - Simple green channel thresholding
+            if best_mask is None or best_coverage < 1.0:
+                try:
+                    # Normalize green channel
+                    g_norm = rescale_intensity(g, out_range=(0, 1))
+                    thresh_g = threshold_li(g_norm)
+                    mask_green = g_norm > (thresh_g * 0.8)  # Relaxed threshold
+                    mask_green = binary_opening(mask_green, disk(3))
+                    coverage_green = np.mean(mask_green) * 100
+                    
+                    if coverage_green > best_coverage:
+                        best_mask = mask_green
+                        best_coverage = coverage_green
+                        method_used = "green_channel_li"
+                        thresh_exg_final = thresh_g
+                except Exception as e:
+                    logging.warning(f"Green channel fallback failed: {str(e)}")
             
-            # 5. Combine masks (hybrid approach)
-            # Weighted combination based on confidence
-            mask_combined = np.logical_or(
-                mask_exg,
-                np.logical_and(mask_hsv, exg > (thresh_exg - 0.1))  # Relaxed ExG for HSV regions
-            )
+            # STRATEGY 4: Last resort - LAB color space a* channel
+            if best_mask is None or best_coverage < 1.0:
+                try:
+                    lab = cv2.cvtColor(img_gamma, cv2.COLOR_RGB2LAB)
+                    a_channel = lab[:,:,1].astype(np.float32)
+                    a_norm = rescale_intensity(a_channel, out_range=(0, 1))
+                    
+                    # Green vegetation typically has negative a* values in LAB
+                    mask_lab = a_norm < 0.5
+                    mask_lab = binary_opening(mask_lab, disk(3))
+                    coverage_lab = np.mean(mask_lab) * 100
+                    
+                    if coverage_lab > best_coverage:
+                        best_mask = mask_lab
+                        best_coverage = coverage_lab
+                        method_used = "lab_a_channel"
+                        thresh_exg_final = 0.5
+                except Exception as e:
+                    logging.warning(f"LAB fallback failed: {str(e)}")
             
-            # 6. Post-processing
-            mask_combined = binary_closing(mask_combined, disk(self.close_radius))
-            mask_combined = remove_small_objects(mask_combined, min_size=self.min_area)
+            # Use the best mask found
+            mask_combined = best_mask if best_mask is not None else np.zeros_like(gray, dtype=bool)
+            
+            # Final post-processing
+            if np.sum(mask_combined) > 0:
+                mask_combined = binary_closing(mask_combined, disk(self.close_radius))
+                mask_combined = remove_small_objects(mask_combined, min_size=self.min_area)
             
             # 7. Calculate statistics on segmented region
             coverage = np.mean(mask_combined) * 100
@@ -221,7 +328,7 @@ class SegmentationModule:
             num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask_uint8)
             regions = []
             for i in range(1, num_labels):
-                if stats[i, cv2.CC_STAT_AREA] > 100:
+                if stats[i, cv2.CC_STAT_AREA] > self.min_area:
                     r_mask = (labels == i)
                     r_area = int(stats[i, cv2.CC_STAT_AREA])
                     r_trex = float(np.mean(trex[r_mask]))
@@ -256,13 +363,15 @@ class SegmentationModule:
                 "stressHeatmapUrl": self.array_to_base64(heatmap),
                 "exrUrl": self.array_to_base64(indices['ExR']),
                 "trexUrl": self.array_to_base64(indices['TREx']),
-                "regions": regions
+                "regions": regions,
+                "methodUsed": method_used,
+                "contrastScore": contrast_score
             }
             
             if coverage < 0.5:
                 error_dict = format_error(
                     "segmentation",
-                    f"Very low biomass coverage detected ({coverage:.2f}%).",
+                    f"Very low biomass coverage detected ({coverage:.2f}%). Method: {method_used}",
                     "Ensure Azolla sample occupies a significant portion of the frame.",
                     "warning"
                 )
@@ -272,14 +381,16 @@ class SegmentationModule:
 
             qc = SegQC(
                 coverage_pct=coverage,
-                threshold_value=float(thresh_exg),
+                threshold_value=float(thresh_exg_final) if 'thresh_exg_final' in locals() else 0.0,
                 otsu_valid=coverage > 0.1,
                 errors=errors,
                 trex_mean=trex_mean,
                 exr_mean=exr_mean,
-                hsv_threshold_used=hsv_threshold_used,
+                hsv_threshold_used=('hsv' in method_used),
                 gr_ratio=gr_ratio,
-                health_score=health_score
+                health_score=health_score,
+                contrast_score=contrast_score,
+                method_used=method_used
             )
             
             return mask_combined.astype(np.uint8) * 255, qc, extra_outputs
@@ -287,10 +398,11 @@ class SegmentationModule:
         except Exception as e:
             logging.error(f"Segmentation failure: {str(e)}")
             import traceback
+            traceback.print_exc()
             error_dict = format_error(
                 "segmentation",
-                f"Otsu thresholding failed: {str(e)}",
-                "Check image contrast and green channel distribution.",
+                f"Segmentation failed: {str(e)}",
+                "Check image contrast and sample density in the uploaded series.",
                 "error"
             )
             errors.append(error_dict)
@@ -304,4 +416,4 @@ class SegmentationModule:
                     "segmentation"
                 )
             
-            return mask, SegQC(0.0, 0.0, False, errors, 0.0, 0.0, False, 0.0, 0.0), {}
+            return mask, SegQC(0.0, 0.0, False, errors, 0.0, 0.0, False, 0.0, 0.0, 0.0, "failed"), {}
