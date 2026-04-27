@@ -45,7 +45,23 @@ class BiomassIsolationModule:
                     else:
                         cv2.imwrite(str(file_path), cv2.cvtColor(val, cv2.COLOR_RGB2BGR))
                 elif isinstance(val, (dict, list)):
+                    # Convert numpy booleans and other non-serializable types
+                    def convert_to_serializable(obj):
+                        if isinstance(obj, dict):
+                            return {k: convert_to_serializable(v) for k, v in obj.items()}
+                        elif isinstance(obj, list):
+                            return [convert_to_serializable(item) for item in obj]
+                        elif isinstance(obj, (np.bool_, np.integer)):
+                            return int(obj)
+                        elif isinstance(obj, (np.floating, float)):
+                            return float(obj)
+                        elif isinstance(obj, np.ndarray):
+                            return obj.tolist()
+                        else:
+                            return obj
+                    
+                    serializable_val = convert_to_serializable(val)
                     with open(output_dir / f"{key}.json", "w") as f:
-                        json.dump(val, f, indent=4)
+                        json.dump(serializable_val, f, indent=4)
         except Exception as e:
             logging.error(f"Export failure: {str(e)}")
