@@ -49,6 +49,7 @@ jobs:
           # Clone the Hugging Face Space
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git config --global user.name "github-actions[bot]"
+          rm -rf hf_space
           git clone https://$HF_TOKEN@huggingface.co/spaces/$HF_SPACE_ID hf_space
           
           # Copy files to the Space (excluding .git folder)
@@ -56,10 +57,13 @@ jobs:
             --exclude='.git' \
             --exclude='hf_space' \
             --exclude='.github' \
+            --exclude='node_modules' \
+            --exclude='dist' \
+            --exclude='*.log' \
             ./ hf_space/
           
           # Commit and push
           cd hf_space
           git add .
           git diff --cached --quiet || git commit -m "Deploy from GitHub: ${{ github.sha }}"
-          git push https://$HF_TOKEN@huggingface.co/spaces/$HF_SPACE_ID main || true
+          git push https://$HF_TOKEN@huggingface.co/spaces/$HF_SPACE_ID main

@@ -36,7 +36,8 @@ const tasks: Record<string, Task> = {};
 
 async function startServer() {
   const app = express();
-  const PORT = Number(process.env.PORT) || 3000;
+  // Hugging Face Spaces uses PORT environment variable (default 7860)
+  const PORT = Number(process.env.PORT) || 7860;
 
   app.use(express.json({ limit: '500mb' }));
   app.use(express.urlencoded({ extended: true, limit: '500mb' }));
@@ -196,7 +197,11 @@ if (process.env.NODE_ENV !== "production" && process.env.ENABLE_RUNTIME_PIP === 
 
 async function runPythonPipeline(imageBuffer: Buffer, filename: string): Promise<any> {
   return new Promise((resolve, reject) => {
-    const python = spawn("python3", ["backend/bridge.py"]);
+    // Use explicit python3 path and set working directory for proper module resolution
+    const python = spawn("python3", ["backend/bridge.py"], {
+      cwd: process.cwd(),
+      env: { ...process.env, PYTHONPATH: process.cwd() }
+    });
     let output = "";
     let errorOutput = "";
 

@@ -1,6 +1,13 @@
 import sys
+import os
 import json
 import base64
+
+# Add backend directory to path for imports
+backend_dir = os.path.join(os.path.dirname(__file__))
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
+
 import cv2
 import numpy as np
 from azolla_processor import AzollaProcessor
