@@ -5,10 +5,13 @@ colorFrom: green
 colorTo: blue
 sdk: docker
 app_port: 7860
+app_file: Dockerfile
+
 codex/kontrol-et-huggingspace-yaplandrmasn-o6w4zt
 app_file: Dockerfile
-=======
+
 main
+
 pinned: false
 license: mit
 ---
