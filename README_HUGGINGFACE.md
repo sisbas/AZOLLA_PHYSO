@@ -51,6 +51,30 @@ This repository is configured for deployment on Hugging Face Spaces using Docker
 
 5. Your Space will automatically build and deploy!
 
+### One-command deploy helper
+
+From this repository root, you can push directly to your Space with:
+
+```bash
+bash scripts/deploy_to_hf_space.sh YOUR_USERNAME/YOUR_SPACE_NAME main
+```
+
+This avoids the common issue where files are committed locally but never pushed to the Space repo.
+
+### Troubleshooting: "No application file"
+
+If your Space shows **"No application file"** and there are no build logs:
+
+1. Confirm these files are in the Space repo root on `main`:
+   - `README.md` with YAML header containing `sdk: docker`
+   - `Dockerfile`
+2. Confirm YAML includes:
+   - `app_port: 7860`
+   - `app_file: Dockerfile`
+3. Push directly to the Space remote and verify the latest commit appears in the **Files** tab.
+4. If the Space was created with another SDK previously, set SDK to Docker again from Space settings (or recreate the Space as Docker).
+5. Trigger a rebuild from **Settings → Factory reboot**.
+
 ## Local Development
 
 ### Prerequisites
