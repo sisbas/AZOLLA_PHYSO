@@ -36,7 +36,7 @@ const tasks: Record<string, Task> = {};
 
 async function startServer() {
   const app = express();
-  const PORT = process.env.PORT || 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   app.use(express.json({ limit: '500mb' }));
   app.use(express.urlencoded({ extended: true, limit: '500mb' }));
@@ -172,25 +172,26 @@ async function startServer() {
 // Algorithmic Pipeline Implementation
 import { spawn, execSync } from "child_process";
 
-// Attempt to install python dependencies if missing
-try {
-  // Install to backend/lib and add to PYTHONPATH
-  const libPath = path.join(process.cwd(), "backend", "lib");
-  const markerPath = path.join(libPath, ".installed");
-  
-  if (!fs.existsSync(markerPath)) {
-    console.log("Installing Python dependencies (Local Target)...");
-    if (!fs.existsSync(libPath)) {
-      fs.mkdirSync(libPath, { recursive: true });
+// Development-only fallback: attempt local pip install if explicitly enabled.
+if (process.env.NODE_ENV !== "production" && process.env.ENABLE_RUNTIME_PIP === "1") {
+  try {
+    const libPath = path.join(process.cwd(), "backend", "lib");
+    const markerPath = path.join(libPath, ".installed");
+
+    if (!fs.existsSync(markerPath)) {
+      console.log("Installing Python dependencies (Local Target)...");
+      if (!fs.existsSync(libPath)) {
+        fs.mkdirSync(libPath, { recursive: true });
+      }
+      execSync(`python3 -m pip install --target="${libPath}" opencv-python-headless Pillow exifread numpy`, { stdio: "inherit" });
+      fs.writeFileSync(markerPath, new Date().toISOString());
+      console.log("Python dependencies installed successfully.");
+    } else {
+      console.log("Python dependencies already installed (Local Target).");
     }
-    execSync(`python3 -m pip install --target="${libPath}" opencv-python-headless Pillow exifread numpy`, { stdio: 'inherit' });
-    fs.writeFileSync(markerPath, new Date().toISOString());
-    console.log("Python dependencies installed successfully.");
-  } else {
-    console.log("Python dependencies already installed (Local Target).");
+  } catch (e) {
+    console.error("Warning: Python dependencies might be missing or pip failed:", e);
   }
-} catch (e) {
-  console.error("Warning: Python dependencies might be missing or pip failed:", e);
 }
 
 async function runPythonPipeline(imageBuffer: Buffer, filename: string): Promise<any> {
