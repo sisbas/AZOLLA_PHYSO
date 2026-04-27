@@ -1,1 +1,39 @@
-Nothing should be ignored since the changes only include Python source files (.py) which are core project files and not build artifacts, dependencies, or temporary files.
+# Binary image files - should not be committed to git
+results/**/*.png
+results/**/*.jpg
+results/**/*.jpeg
+results/**/*.bmp
+results/**/*.tiff
+
+# Test outputs
+*.png
+*.jpg
+*.jpeg
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary files
+tmp/
+temp/
