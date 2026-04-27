@@ -2,7 +2,7 @@
 import cv2
 import numpy as np
 import logging
-from typing import Tuple, Dict, Any
+from typing import Tuple, Dict, Any, List
 from dataclasses import dataclass
 from skimage.restoration import denoise_tv_chambolle
 

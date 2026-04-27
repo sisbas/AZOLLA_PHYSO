@@ -13,6 +13,12 @@ segmentation:
   min_area: 150
   close_radius: 2
   threshold_tolerance: 2.0
+  # HSV ranges for fern fronds (Azolla optimized)
+  hsv_min: [35, 40, 40]
+  hsv_max: [85, 255, 255]
+  adaptive_hsv: true
+  trex_weight: 0.3
+  exg_weight: 0.7
 
 mask_optimizer:
   min_area: 150

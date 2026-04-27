@@ -77,9 +77,13 @@ class FeatureExtractionModule:
             entropy = 0.5 + 0.1 * g_skew if len(g_valid) > 100 else 0.0
             contrast = 0.0
             
+            # Calculate coverage percentage correctly (mask is now 0-255 uint8)
+            mask_bool = mask > 0 if mask.max() > 1 else mask.astype(bool)
+            coverage_pct_val = float(np.mean(mask_bool) * 100)
+            
             return FeatureRecord(
                 timestamp=timestamp,
-                area=float(np.sum(mask)),
+                area=float(np.sum(mask_bool)),
                 mean_r=mean_r,
                 mean_g=mean_g,
                 mean_b=mean_b,
@@ -88,7 +92,7 @@ class FeatureExtractionModule:
                 g_kurt=g_kurt,
                 glcm_entropy=entropy,
                 glcm_contrast=contrast,
-                coverage_pct=float(np.mean(mask) * 100),
+                coverage_pct=coverage_pct_val,
                 errors=errors
             )
         except Exception as e:
