@@ -334,7 +334,7 @@ async function processImages(taskId: string, files: Express.Multer.File[]) {
         image_urls: {
           rgb: pythonRes.processed_image, 
           pseudocolor: pythonRes.mask_image,
-          isolated: pythonRes.processed_image,
+          isolated: pythonRes.isolated_image || pythonRes.processed_image,
         },
         confidence: pythonRes.confidence || 0,
         context: pythonRes.context || {}

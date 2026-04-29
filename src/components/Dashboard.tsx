@@ -359,8 +359,9 @@ export default function Dashboard({ taskId }: DashboardProps) {
                 {/* Dashboard Image View */}
                 <div className="lg:col-span-3 bg-white border border-[#e2e8f0] rounded-2xl overflow-hidden flex flex-col shadow-xl shadow-slate-200/50 relative">
                   <div className="h-[56px] border-b border-slate-100 flex items-center justify-between px-6 bg-white/50 backdrop-blur-sm z-10">
-                     <div className="flex bg-slate-100/80 p-1 rounded-xl">
-                        {(['rgb', 'pseudo', 'overlay', 'isolated'] as const).map(mode => (
+                     <div className="flex items-center gap-2">
+                       <div className="flex bg-slate-100/80 p-1 rounded-xl">
+                        {(['rgb', 'pseudo', 'overlay'] as const).map(mode => (
                           <button
                             key={mode}
                             onClick={() => setViewMode(mode)}
@@ -369,9 +370,22 @@ export default function Dashboard({ taskId }: DashboardProps) {
                               viewMode === mode ? "bg-white text-slate-900 shadow-md ring-1 ring-slate-200" : "text-slate-400 hover:text-slate-600"
                             )}
                           >
-                            {mode === 'isolated' ? 'Saf Biyokütle' : mode}
+                            {mode}
                           </button>
                         ))}
+                       </div>
+                       <button
+                         onClick={() => setViewMode('isolated')}
+                         className={cn(
+                           "px-5 py-2 text-[10px] font-bold rounded-xl transition-all uppercase tracking-widest border flex items-center gap-2",
+                           viewMode === 'isolated'
+                             ? "bg-emerald-600 text-white border-emerald-600 shadow-lg shadow-emerald-200"
+                             : "bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50"
+                         )}
+                       >
+                         <Sparkles size={14} />
+                         Segmentasyon
+                       </button>
                      </div>
                      <div className="flex items-center gap-4">
                         <div className="h-4 w-px bg-slate-200" />
