@@ -127,6 +127,41 @@ async function startServer() {
     }
   });
 
+  apiRouter.post("/v1/insights", async (req, res) => {
+    try {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        return res.status(503).json({ error: "AI servisi yapılandırılmamış (GEMINI_API_KEY eksik)." });
+      }
+
+      const prompt = req.body?.prompt;
+      const model = req.body?.model || "gemini-2.5-flash";
+      if (!prompt || typeof prompt !== "string") {
+        return res.status(400).json({ error: "Geçerli bir prompt gönderilmelidir." });
+      }
+
+      const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }]
+        })
+      });
+
+      const geminiData: any = await geminiRes.json().catch(() => ({}));
+      if (!geminiRes.ok) {
+        return res.status(geminiRes.status).json({
+          error: geminiData?.error?.message || "AI sağlayıcısından geçersiz yanıt alındı."
+        });
+      }
+
+      const text = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+      res.json({ text });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "AI yorum servisi hatası" });
+    }
+  });
+
   apiRouter.get("/v1/tasks/:id/status", (req, res) => {
     const task = tasks[req.params.id];
     if (!task) return res.status(404).json({ error: "Task not found" });

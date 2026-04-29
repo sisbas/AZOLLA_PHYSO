@@ -3,7 +3,6 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../App';
 import { Loader2, AlertCircle, Maximize2, Download, Filter, Layers, Zap, Database, Activity, BarChart3, TrendingUp, PieChart as PieIcon, ListChecks, Sparkles, BrainCircuit, Microscope, CheckCircle2 } from 'lucide-react';
-import { GoogleGenAI } from "@google/genai";
 
 interface DashboardProps {
   taskId: string;
@@ -70,7 +69,6 @@ export default function Dashboard({ taskId }: DashboardProps) {
     if (interpretation || isInterpreting) return;
     setIsInterpreting(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       const prompt = `Azolla pinnata bitkisi üzerinde yapılan fizyolojik stres analizinin sonuçlarını teknik ve bilimsel bir dille yorumla.
       
       Veriler:
@@ -87,11 +85,26 @@ export default function Dashboard({ taskId }: DashboardProps) {
       
       Yanıtı profesyonel bir biyolog/agronom gibi Türkçe ver. Markdown formatında başlıklar kullanarak düzenli bir şekilde yaz.`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt
+      const response = await fetch('/api/v1/insights', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          prompt,
+          model: 'gemini-3-flash-preview'
+        })
       });
-      setInterpretation(response.text || 'Yorum oluşturulamadı.');
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Yorum servisi hatası (${response.status})`);
+      }
+
+      const data = await response.json();
+      setInterpretation(data.text || 'Yorum oluşturulamadı.');
     } catch (err) {
       console.error("AI Error:", err);
       setInterpretation('Analiz yorumu oluşturulurken bir hata oluştu. Lütfen parametreleri kontrol edin.');
