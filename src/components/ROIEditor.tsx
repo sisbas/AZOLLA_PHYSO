@@ -215,6 +215,13 @@ export default function ROIEditor({ imageUrl, onSave, onClose }: ROIEditorProps)
     if (roiShape.type === 'rectangular' && roiShape.points.length >= 2) {
       const start = roiShape.points[0];
       const end = roiShape.points[roiShape.points.length - 1];
+
+    const target = [...shapes].reverse().find((s) => s.points.length >= 2);
+    if (!target) return null;
+
+    if (target.type === 'rectangular' && target.points.length >= 2) {
+      const start = target.points[0];
+      const end = target.points[target.points.length - 1];
       const left = Math.min(start.x, end.x);
       const right = Math.max(start.x, end.x);
       const top = Math.min(start.y, end.y);
@@ -225,6 +232,9 @@ export default function ROIEditor({ imageUrl, onSave, onClose }: ROIEditorProps)
     if (roiShape.type === 'elliptic' && roiShape.points.length >= 2) {
       const start = roiShape.points[0];
       const end = roiShape.points[roiShape.points.length - 1];
+    if (target.type === 'elliptic' && target.points.length >= 2) {
+      const start = target.points[0];
+      const end = target.points[target.points.length - 1];
       const cx = (start.x + end.x) / 2;
       const cy = (start.y + end.y) / 2;
       const rx = Math.max(1, Math.abs(end.x - start.x) / 2);
@@ -242,6 +252,19 @@ export default function ROIEditor({ imageUrl, onSave, onClose }: ROIEditorProps)
     }
 
     return null;
+
+    if (target.points.length >= 3) {
+      return `polygon(${target.points.map((p) => `${p.x}px ${p.y}px`).join(',')})`;
+    }
+
+    return null;
+
+
+    const target = [...shapes].reverse().find((s) => s.points.length >= 3);
+    if (!target) return null;
+    return `polygon(${target.points.map((p) => `${p.x}px ${p.y}px`).join(',')})`;
+
+
   };
 
   const drawShapes = (ctx: CanvasRenderingContext2D) => {
