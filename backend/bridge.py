@@ -16,7 +16,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.StreamHandler(sys.stdout)
+        logging.StreamHandler(sys.stderr)
     ]
 )
 logger = logging.getLogger("AzollaBridge")
@@ -174,6 +174,10 @@ def main():
             
             _, buffer_mask = cv2.imencode(".jpg", result["mask"])
             mask_b64 = base64.b64encode(buffer_mask).decode("utf-8")
+
+            isolated_img = result.get("isolated_image", result["processed_image"])
+            _, buffer_isolated = cv2.imencode(".jpg", isolated_img)
+            isolated_b64 = base64.b64encode(buffer_isolated).decode("utf-8")
             
             logger.info("Results encoded successfully")
             
@@ -192,6 +196,7 @@ def main():
             "metrics": result.get("metrics", {}),
             "processed_image": f"data:image/jpeg;base64,{processed_b64}",
             "mask_image": f"data:image/jpeg;base64,{mask_b64}",
+            "isolated_image": f"data:image/jpeg;base64,{isolated_b64}",
             "confidence": result.get("confidence_score", 0.0),
             "timestamp": result.get("timestamp", datetime.now().strftime('%Y-%m-%d %H:%M')),
             "context": {
