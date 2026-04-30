@@ -93,6 +93,32 @@ class AzollaProcessor:
             kernel = np.ones(self.config["morph_kernel_size"], np.uint8)
             mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
             mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+
+            # Keep only the primary Azolla component to suppress dish reflections/noise.
+            num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+            if num_labels > 1:
+                img_h, img_w = mask.shape[:2]
+                img_center = np.array([img_w / 2.0, img_h / 2.0], dtype=np.float32)
+                best_label = 0
+                best_score = float("-inf")
+
+                for label in range(1, num_labels):
+                    area = float(stats[label, cv2.CC_STAT_AREA])
+                    if area < 100:
+                        continue
+                    centroid = centroids[label]
+                    dist = float(np.linalg.norm(centroid - img_center))
+                    # Prefer larger components that are closer to the image center.
+                    score = area - (dist * 20.0)
+                    if score > best_score:
+                        best_score = score
+                        best_label = label
+
+                if best_label > 0:
+                    mask = np.where(labels == best_label, 255, 0).astype(np.uint8)
+
+            # Fill small internal holes for cleaner biomass silhouette
+            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((9, 9), np.uint8))
             
             # GrabCut integration point (placeholder/commented)
             # bgdModel = np.zeros((1, 65), np.float64)
@@ -244,12 +270,14 @@ class AzollaProcessor:
         # 5. Normalization
         normalized = self.normalize_and_standardize(balanced)
         
-        # 6. Overlay
+        # 6. Build isolated image + overlay
+        isolated_image = cv2.bitwise_and(normalized, normalized, mask=mask)
         final_image = self.add_timestamp_overlay(normalized, metrics)
         
         return {
             "metrics": asdict(metrics),
             "processed_image": final_image,
+            "isolated_image": isolated_image,
             "mask": mask,
             "timestamp": metrics.timestamp,
             "confidence_score": metrics.confidence_score
