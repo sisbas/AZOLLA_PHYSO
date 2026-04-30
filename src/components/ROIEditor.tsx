@@ -126,9 +126,43 @@ export default function ROIEditor({ imageUrl, onSave, onClose }: ROIEditorProps)
 
   const getSegmentationClipPath = () => {
     if (shapes.length === 0) return null;
+    const target = [...shapes].reverse().find((s) => s.points.length >= 2);
+    if (!target) return null;
+
+    if (target.type === 'rectangular' && target.points.length >= 2) {
+      const start = target.points[0];
+      const end = target.points[target.points.length - 1];
+      const left = Math.min(start.x, end.x);
+      const right = Math.max(start.x, end.x);
+      const top = Math.min(start.y, end.y);
+      const bottom = Math.max(start.y, end.y);
+      return `polygon(${left}px ${top}px, ${right}px ${top}px, ${right}px ${bottom}px, ${left}px ${bottom}px)`;
+    }
+
+    if (target.type === 'elliptic' && target.points.length >= 2) {
+      const start = target.points[0];
+      const end = target.points[target.points.length - 1];
+      const cx = (start.x + end.x) / 2;
+      const cy = (start.y + end.y) / 2;
+      const rx = Math.max(1, Math.abs(end.x - start.x) / 2);
+      const ry = Math.max(1, Math.abs(end.y - start.y) / 2);
+      const segments = 36;
+      const ellipsePoints = Array.from({ length: segments }, (_, i) => {
+        const theta = (i / segments) * Math.PI * 2;
+        return `${cx + Math.cos(theta) * rx}px ${cy + Math.sin(theta) * ry}px`;
+      });
+      return `polygon(${ellipsePoints.join(',')})`;
+    }
+
+    if (target.points.length >= 3) {
+      return `polygon(${target.points.map((p) => `${p.x}px ${p.y}px`).join(',')})`;
+    }
+
+    return null;
     const target = [...shapes].reverse().find((s) => s.points.length >= 3);
     if (!target) return null;
     return `polygon(${target.points.map((p) => `${p.x}px ${p.y}px`).join(',')})`;
+
   };
 
   const drawShapes = (ctx: CanvasRenderingContext2D) => {
