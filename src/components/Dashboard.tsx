@@ -3,7 +3,6 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../App';
 import { Loader2, AlertCircle, Maximize2, Download, Filter, Layers, Zap, Database, Activity, BarChart3, TrendingUp, PieChart as PieIcon, ListChecks, Sparkles, BrainCircuit, Microscope, CheckCircle2 } from 'lucide-react';
-import { GoogleGenAI } from "@google/genai";
 
 interface DashboardProps {
   taskId: string;
@@ -70,7 +69,6 @@ export default function Dashboard({ taskId }: DashboardProps) {
     if (interpretation || isInterpreting) return;
     setIsInterpreting(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       const prompt = `Azolla pinnata bitkisi üzerinde yapılan fizyolojik stres analizinin sonuçlarını teknik ve bilimsel bir dille yorumla.
       
       Veriler:
@@ -87,11 +85,26 @@ export default function Dashboard({ taskId }: DashboardProps) {
       
       Yanıtı profesyonel bir biyolog/agronom gibi Türkçe ver. Markdown formatında başlıklar kullanarak düzenli bir şekilde yaz.`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt
+      const response = await fetch('/api/v1/insights', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          prompt,
+          model: 'gemini-3-flash-preview'
+        })
       });
-      setInterpretation(response.text || 'Yorum oluşturulamadı.');
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Yorum servisi hatası (${response.status})`);
+      }
+
+      const data = await response.json();
+      setInterpretation(data.text || 'Yorum oluşturulamadı.');
     } catch (err) {
       console.error("AI Error:", err);
       setInterpretation('Analiz yorumu oluşturulurken bir hata oluştu. Lütfen parametreleri kontrol edin.');
@@ -359,8 +372,9 @@ export default function Dashboard({ taskId }: DashboardProps) {
                 {/* Dashboard Image View */}
                 <div className="lg:col-span-3 bg-white border border-[#e2e8f0] rounded-2xl overflow-hidden flex flex-col shadow-xl shadow-slate-200/50 relative">
                   <div className="h-[56px] border-b border-slate-100 flex items-center justify-between px-6 bg-white/50 backdrop-blur-sm z-10">
-                     <div className="flex bg-slate-100/80 p-1 rounded-xl">
-                        {(['rgb', 'pseudo', 'overlay', 'isolated'] as const).map(mode => (
+                     <div className="flex items-center gap-2">
+                       <div className="flex bg-slate-100/80 p-1 rounded-xl">
+                        {(['rgb', 'pseudo', 'overlay'] as const).map(mode => (
                           <button
                             key={mode}
                             onClick={() => setViewMode(mode)}
@@ -369,9 +383,22 @@ export default function Dashboard({ taskId }: DashboardProps) {
                               viewMode === mode ? "bg-white text-slate-900 shadow-md ring-1 ring-slate-200" : "text-slate-400 hover:text-slate-600"
                             )}
                           >
-                            {mode === 'isolated' ? 'Saf Biyokütle' : mode}
+                            {mode}
                           </button>
                         ))}
+                       </div>
+                       <button
+                         onClick={() => setViewMode('isolated')}
+                         className={cn(
+                           "px-5 py-2 text-[10px] font-bold rounded-xl transition-all uppercase tracking-widest border flex items-center gap-2",
+                           viewMode === 'isolated'
+                             ? "bg-emerald-600 text-white border-emerald-600 shadow-lg shadow-emerald-200"
+                             : "bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50"
+                         )}
+                       >
+                         <Sparkles size={14} />
+                         Segmentasyon
+                       </button>
                      </div>
                      <div className="flex items-center gap-4">
                         <div className="h-4 w-px bg-slate-200" />
@@ -437,6 +464,15 @@ export default function Dashboard({ taskId }: DashboardProps) {
                               viewMode === 'rgb' ? "bg-white" : viewMode === 'pseudo' ? "bg-rose-500" : "bg-cyan-400"
                             )} />
                             <span className="text-[9px] font-bold text-white uppercase tracking-[0.2em]">{viewMode} ACTIVE</span>
+                          </div>
+                        </div>
+
+                        {/* Capture date/time */}
+                        <div className="absolute bottom-6 right-6 pointer-events-none">
+                          <div className="bg-black/70 backdrop-blur-md px-3 py-2 rounded-lg border border-white/10">
+                            <span className="text-[10px] font-mono font-bold text-white/90 uppercase tracking-wider">
+                              Çekim Tarihi: {currentFrame.timestamp || '-'}
+                            </span>
                           </div>
                         </div>
                      </div>
