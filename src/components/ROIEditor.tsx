@@ -242,6 +242,13 @@ export default function ROIEditor({ imageUrl, onSave, onClose }: ROIEditorProps)
     }
 
     return null;
+
+
+    const target = [...shapes].reverse().find((s) => s.points.length >= 3);
+    if (!target) return null;
+    return `polygon(${target.points.map((p) => `${p.x}px ${p.y}px`).join(',')})`;
+
+
   };
 
   const drawShapes = (ctx: CanvasRenderingContext2D) => {
