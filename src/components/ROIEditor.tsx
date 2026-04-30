@@ -41,6 +41,7 @@ export default function ROIEditor({ imageUrl, onSave, onClose }: ROIEditorProps)
   const [isAutoDetecting, setIsAutoDetecting] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [isSystemActive, setIsSystemActive] = useState(false);
+  const [previewMode, setPreviewMode] = useState<'original' | 'segmented'>('original');
   
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -55,6 +56,7 @@ export default function ROIEditor({ imageUrl, onSave, onClose }: ROIEditorProps)
       reader.onloadend = () => {
         setUploadedImage(reader.result as string);
         clearShapes();
+        setPreviewMode('original');
       };
       reader.readAsDataURL(file);
     }
@@ -66,48 +68,132 @@ export default function ROIEditor({ imageUrl, onSave, onClose }: ROIEditorProps)
 
   const runAutoDetect = () => {
     setIsAutoDetecting(true);
-    // Simulate AI pixel-level segmentation
-    setTimeout(() => {
-      const rect = containerRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      
-      const width = rect.width;
-      const height = rect.height;
-      const cx = width / 2;
-      const cy = height / 2;
-      
-      // Generate an "organic" plant shape (rough convex hull simulation)
-      const points: { x: number; y: number }[] = [];
-      const numPoints = 24; // High resolution for the polygon
-      const baseRadius = Math.min(width, height) * 0.32;
-      
-      for (let i = 0; i <= numPoints; i++) {
-        const angle = (i / numPoints) * Math.PI * 2;
-        // Add "leafy" jitter to the radius
-        const jitter = (Math.sin(angle * 5) * 25) + (Math.cos(angle * 3) * 15) + (Math.random() * 10);
-        const r = baseRadius + jitter;
-        points.push({
-          x: cx + Math.cos(angle) * r,
-          y: cy + Math.sin(angle) * r
-        });
-      }
-      
-      const autoShape: Shape = {
-        id: 'auto-' + Date.now(),
-        type: 'freehand',
-        points: points,
-        color: '#10b981'
-      };
-      
-      setShapes([autoShape]);
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) {
       setIsAutoDetecting(false);
-      setShowConfirmModal(true);
-    }, 1800);
+      return;
+    }
+
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const containerW = rect.width;
+        const containerH = rect.height;
+        const scale = Math.min((containerW * 1.2) / img.width, (containerH * 1.2) / img.height);
+        const drawW = img.width * scale;
+        const drawH = img.height * scale;
+        const offsetX = (containerW - drawW) / 2;
+        const offsetY = (containerH - drawH) / 2;
+
+        const offscreen = document.createElement('canvas');
+        offscreen.width = Math.max(1, Math.round(drawW));
+        offscreen.height = Math.max(1, Math.round(drawH));
+        const ctx = offscreen.getContext('2d');
+        if (!ctx) throw new Error('Canvas context unavailable');
+        ctx.drawImage(img, 0, 0, offscreen.width, offscreen.height);
+
+        const imageData = ctx.getImageData(0, 0, offscreen.width, offscreen.height);
+        const data = imageData.data;
+        const mask = new Uint8Array(offscreen.width * offscreen.height);
+
+        for (let i = 0; i < data.length; i += 4) {
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
+          const exg = (2 * g) - r - b;
+          const isGreen = g > 40 && exg > 15 && g > r * 0.8 && g > b * 0.8;
+          mask[i / 4] = isGreen ? 1 : 0;
+        }
+
+        const visited = new Uint8Array(mask.length);
+        const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+        let bestComponent: number[] = [];
+
+        for (let y = 0; y < offscreen.height; y++) {
+          for (let x = 0; x < offscreen.width; x++) {
+            const idx = y * offscreen.width + x;
+            if (!mask[idx] || visited[idx]) continue;
+            const queue = [idx];
+            visited[idx] = 1;
+            const comp: number[] = [];
+            while (queue.length) {
+              const cur = queue.pop()!;
+              comp.push(cur);
+              const cx = cur % offscreen.width;
+              const cy = Math.floor(cur / offscreen.width);
+              for (const [dx, dy] of dirs) {
+                const nx = cx + dx, ny = cy + dy;
+                if (nx < 0 || ny < 0 || nx >= offscreen.width || ny >= offscreen.height) continue;
+                const nidx = ny * offscreen.width + nx;
+                if (!mask[nidx] || visited[nidx]) continue;
+                visited[nidx] = 1;
+                queue.push(nidx);
+              }
+            }
+            if (comp.length > bestComponent.length) bestComponent = comp;
+          }
+        }
+
+        if (bestComponent.length < 50) throw new Error('No strong component');
+
+        const pointSet = new Set(bestComponent);
+        const boundary: {x:number; y:number}[] = [];
+        for (const p of bestComponent) {
+          const x = p % offscreen.width;
+          const y = Math.floor(p / offscreen.width);
+          let edge = false;
+          for (const [dx, dy] of dirs) {
+            const nx = x + dx, ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= offscreen.width || ny >= offscreen.height || !pointSet.has(ny * offscreen.width + nx)) {
+              edge = true; break;
+            }
+          }
+          if (edge) boundary.push({x, y});
+        }
+
+        const cx = boundary.reduce((s, p) => s + p.x, 0) / boundary.length;
+        const cy = boundary.reduce((s, p) => s + p.y, 0) / boundary.length;
+        boundary.sort((a, b) => Math.atan2(a.y - cy, a.x - cx) - Math.atan2(b.y - cy, b.x - cx));
+
+        const sampled = boundary.filter((_, i) => i % Math.max(1, Math.floor(boundary.length / 80)) === 0);
+        const points = sampled.map((p) => ({ x: p.x + offsetX, y: p.y + offsetY }));
+
+        setShapes([{
+          id: 'auto-' + Date.now(),
+          type: 'freehand',
+          points,
+          color: '#10b981'
+        }]);
+        setShowConfirmModal(true);
+      } catch {
+        // Fallback: centered ellipse when image-based segmentation fails
+        const width = rect.width;
+        const height = rect.height;
+        setShapes([{
+          id: 'auto-' + Date.now(),
+          type: 'elliptic',
+          points: [
+            { x: width * 0.2, y: height * 0.2 },
+            { x: width * 0.8, y: height * 0.8 }
+          ],
+          color: '#10b981'
+        }]);
+        setShowConfirmModal(true);
+      } finally {
+        setIsAutoDetecting(false);
+      }
+    };
+    img.onerror = () => {
+      setIsAutoDetecting(false);
+    };
+    img.src = displayImage;
   };
 
   const handleActivate = () => {
     setIsSystemActive(true);
     setShowConfirmModal(false);
+    setPreviewMode('segmented');
     // Animation effect
     setTimeout(() => {
       // Small feedback alert or redirect
@@ -120,6 +206,43 @@ export default function ROIEditor({ imageUrl, onSave, onClose }: ROIEditorProps)
     { id: 'elliptic' as Tool, label: 'Eliptik', icon: Circle },
     { id: 'rectangular' as Tool, label: 'Dikdörtgen', icon: Square },
   ];
+
+  const getSegmentationClipPath = () => {
+    if (shapes.length === 0) return null;
+    const target = [...shapes].reverse().find((s) => s.points.length >= 2);
+    if (!target) return null;
+
+    if (target.type === 'rectangular' && target.points.length >= 2) {
+      const start = target.points[0];
+      const end = target.points[target.points.length - 1];
+      const left = Math.min(start.x, end.x);
+      const right = Math.max(start.x, end.x);
+      const top = Math.min(start.y, end.y);
+      const bottom = Math.max(start.y, end.y);
+      return `polygon(${left}px ${top}px, ${right}px ${top}px, ${right}px ${bottom}px, ${left}px ${bottom}px)`;
+    }
+
+    if (target.type === 'elliptic' && target.points.length >= 2) {
+      const start = target.points[0];
+      const end = target.points[target.points.length - 1];
+      const cx = (start.x + end.x) / 2;
+      const cy = (start.y + end.y) / 2;
+      const rx = Math.max(1, Math.abs(end.x - start.x) / 2);
+      const ry = Math.max(1, Math.abs(end.y - start.y) / 2);
+      const segments = 36;
+      const ellipsePoints = Array.from({ length: segments }, (_, i) => {
+        const theta = (i / segments) * Math.PI * 2;
+        return `${cx + Math.cos(theta) * rx}px ${cy + Math.sin(theta) * ry}px`;
+      });
+      return `polygon(${ellipsePoints.join(',')})`;
+    }
+
+    if (target.points.length >= 3) {
+      return `polygon(${target.points.map((p) => `${p.x}px ${p.y}px`).join(',')})`;
+    }
+
+    return null;
+  };
 
   const drawShapes = (ctx: CanvasRenderingContext2D) => {
     ctx.clearRect(0, 0, ctx.canvas.width / (window.devicePixelRatio || 1), ctx.canvas.height / (window.devicePixelRatio || 1));
@@ -199,6 +322,7 @@ export default function ROIEditor({ imageUrl, onSave, onClose }: ROIEditorProps)
     setShapes([]);
     setCurrentShape(null);
     setIsSystemActive(false);
+    setPreviewMode('original');
   };
 
   useEffect(() => {
@@ -277,7 +401,10 @@ export default function ROIEditor({ imageUrl, onSave, onClose }: ROIEditorProps)
           />
         )}
 
-        <div className="absolute inset-0 flex items-center justify-center p-20 pointer-events-none">
+        <div className={cn(
+          "absolute inset-0 flex items-center justify-center p-20 pointer-events-none transition-all duration-700",
+          previewMode === 'segmented' && "opacity-20"
+        )}>
            <img 
              src={displayImage}
              alt="Source"
@@ -288,6 +415,20 @@ export default function ROIEditor({ imageUrl, onSave, onClose }: ROIEditorProps)
              style={{ filter: 'contrast(1.4) drop-shadow(0 0 50px rgba(16, 185, 129, 0.2))' }}
            />
         </div>
+
+        {previewMode === 'segmented' && getSegmentationClipPath() && (
+          <div className="absolute inset-0 flex items-center justify-center p-20 pointer-events-none bg-black/85 transition-all duration-700">
+            <img
+              src={displayImage}
+              alt="Segmented Source"
+              className="max-w-[120%] max-h-[120%] object-contain transition-all duration-1000"
+              style={{
+                clipPath: getSegmentationClipPath() || undefined,
+                filter: 'contrast(1.45) brightness(1.1) saturate(1.55) drop-shadow(0 0 40px rgba(16, 185, 129, 0.35))'
+              }}
+            />
+          </div>
+        )}
 
         <canvas 
           ref={canvasRef}
