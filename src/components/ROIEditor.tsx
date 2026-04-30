@@ -104,6 +104,9 @@ export default function ROIEditor({
   const [isAutoDetecting, setIsAutoDetecting] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [isSystemActive, setIsSystemActive] = useState(false);
+  const [previewMode, setPreviewMode] = useState<'original' | 'segmented'>('original');
+  
+
   const [previewMode, setPreviewMode] = useState<PreviewMode>('original');
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
 
@@ -260,6 +263,15 @@ export default function ROIEditor({
 
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setUploadedImage(reader.result as string);
+        clearShapes();
+        setPreviewMode('original');
+      };
+      reader.readAsDataURL(file);
+
     if (!file) return;
 
     if (!file.type.startsWith('image/')) {
@@ -377,6 +389,66 @@ export default function ROIEditor({
     if (isAutoDetecting || isSystemActive) return;
     
     setIsAutoDetecting(true);
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) {
+      setIsAutoDetecting(false);
+      return;
+    }
+
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const containerW = rect.width;
+        const containerH = rect.height;
+        const scale = Math.min((containerW * 1.2) / img.width, (containerH * 1.2) / img.height);
+        const drawW = img.width * scale;
+        const drawH = img.height * scale;
+        const offsetX = (containerW - drawW) / 2;
+        const offsetY = (containerH - drawH) / 2;
+
+        const offscreen = document.createElement('canvas');
+        offscreen.width = Math.max(1, Math.round(drawW));
+        offscreen.height = Math.max(1, Math.round(drawH));
+        const ctx = offscreen.getContext('2d');
+        if (!ctx) throw new Error('Canvas context unavailable');
+        ctx.drawImage(img, 0, 0, offscreen.width, offscreen.height);
+
+        const imageData = ctx.getImageData(0, 0, offscreen.width, offscreen.height);
+        const data = imageData.data;
+        const mask = new Uint8Array(offscreen.width * offscreen.height);
+
+        for (let i = 0; i < data.length; i += 4) {
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
+          const exg = (2 * g) - r - b;
+          const isGreen = g > 40 && exg > 15 && g > r * 0.8 && g > b * 0.8;
+          mask[i / 4] = isGreen ? 1 : 0;
+        }
+
+        const visited = new Uint8Array(mask.length);
+        const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+        let bestComponent: number[] = [];
+
+        for (let y = 0; y < offscreen.height; y++) {
+          for (let x = 0; x < offscreen.width; x++) {
+            const idx = y * offscreen.width + x;
+            if (!mask[idx] || visited[idx]) continue;
+            const queue = [idx];
+            visited[idx] = 1;
+            const comp: number[] = [];
+            while (queue.length) {
+              const cur = queue.pop()!;
+              comp.push(cur);
+              const cx = cur % offscreen.width;
+              const cy = Math.floor(cur / offscreen.width);
+              for (const [dx, dy] of dirs) {
+                const nx = cx + dx, ny = cy + dy;
+                if (nx < 0 || ny < 0 || nx >= offscreen.width || ny >= offscreen.height) continue;
+                const nidx = ny * offscreen.width + nx;
+                if (!mask[nidx] || visited[nidx]) continue;
+
     const container = containerRef.current;
     if (!container) {
       setIsAutoDetecting(false);
@@ -459,6 +531,65 @@ export default function ROIEditor({
                 queue.push(nidx);
               }
             }
+            if (comp.length > bestComponent.length) bestComponent = comp;
+          }
+        }
+
+        if (bestComponent.length < 50) throw new Error('No strong component');
+
+        const pointSet = new Set(bestComponent);
+        const boundary: {x:number; y:number}[] = [];
+        for (const p of bestComponent) {
+          const x = p % offscreen.width;
+          const y = Math.floor(p / offscreen.width);
+          let edge = false;
+          for (const [dx, dy] of dirs) {
+            const nx = x + dx, ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= offscreen.width || ny >= offscreen.height || !pointSet.has(ny * offscreen.width + nx)) {
+              edge = true; break;
+            }
+          }
+          if (edge) boundary.push({x, y});
+        }
+
+        const cx = boundary.reduce((s, p) => s + p.x, 0) / boundary.length;
+        const cy = boundary.reduce((s, p) => s + p.y, 0) / boundary.length;
+        boundary.sort((a, b) => Math.atan2(a.y - cy, a.x - cx) - Math.atan2(b.y - cy, b.x - cx));
+
+        const sampled = boundary.filter((_, i) => i % Math.max(1, Math.floor(boundary.length / 80)) === 0);
+        const points = sampled.map((p) => ({ x: p.x + offsetX, y: p.y + offsetY }));
+
+        setShapes([{
+          id: 'auto-' + Date.now(),
+          type: 'freehand',
+          points,
+          color: '#10b981'
+        }]);
+        setShowConfirmModal(true);
+      } catch {
+        // Fallback: centered ellipse when image-based segmentation fails
+        const width = rect.width;
+        const height = rect.height;
+        setShapes([{
+          id: 'auto-' + Date.now(),
+          type: 'elliptic',
+          points: [
+            { x: width * 0.2, y: height * 0.2 },
+            { x: width * 0.8, y: height * 0.8 }
+          ],
+          color: '#10b981'
+        }]);
+        setShowConfirmModal(true);
+      } finally {
+        setIsAutoDetecting(false);
+      }
+    };
+    img.onerror = () => {
+      setIsAutoDetecting(false);
+    };
+    img.src = displayImage;
+  };
+
           }
 
           if (component.length > largestComponent.length) {
@@ -561,6 +692,8 @@ export default function ROIEditor({
     setIsSystemActive(true);
     setShowConfirmModal(false);
     setPreviewMode('segmented');
+    // Animation effect
+
     
     // Prepare result data
     const result: ROIResult = {
@@ -585,6 +718,70 @@ export default function ROIEditor({
   // ─────────────────────────────────────────────────────────
   // EFFECTS
   // ─────────────────────────────────────────────────────────
+
+  const getSegmentationClipPath = () => {
+    if (shapes.length === 0) return null;
+    const roiShape = [...shapes].reverse().find((s) => s.points.length >= 2);
+    if (!roiShape) return null;
+
+    if (roiShape.type === 'rectangular' && roiShape.points.length >= 2) {
+      const start = roiShape.points[0];
+      const end = roiShape.points[roiShape.points.length - 1];
+      const left = Math.min(start.x, end.x);
+      const right = Math.max(start.x, end.x);
+      const top = Math.min(start.y, end.y);
+      const bottom = Math.max(start.y, end.y);
+      return `polygon(${left}px ${top}px, ${right}px ${top}px, ${right}px ${bottom}px, ${left}px ${bottom}px)`;
+    }
+
+    if (roiShape.type === 'elliptic' && roiShape.points.length >= 2) {
+      const start = roiShape.points[0];
+      const end = roiShape.points[roiShape.points.length - 1];
+      const cx = (start.x + end.x) / 2;
+      const cy = (start.y + end.y) / 2;
+      const rx = Math.max(1, Math.abs(end.x - start.x) / 2);
+      const ry = Math.max(1, Math.abs(end.y - start.y) / 2);
+      const segments = 36;
+      const ellipsePoints = Array.from({ length: segments }, (_, i) => {
+        const theta = (i / segments) * Math.PI * 2;
+        return `${cx + Math.cos(theta) * rx}px ${cy + Math.sin(theta) * ry}px`;
+      });
+      return `polygon(${ellipsePoints.join(',')})`;
+    }
+
+    if (roiShape.points.length >= 3) {
+      return `polygon(${roiShape.points.map((p) => `${p.x}px ${p.y}px`).join(',')})`;
+    }
+
+    return null;
+  };
+
+  const drawShapes = (ctx: CanvasRenderingContext2D) => {
+    ctx.clearRect(0, 0, ctx.canvas.width / (window.devicePixelRatio || 1), ctx.canvas.height / (window.devicePixelRatio || 1));
+    
+    [...shapes, ...(currentShape ? [currentShape] : [])].forEach(shape => {
+      ctx.beginPath();
+      ctx.strokeStyle = shape.color === '#10b981' ? '#10b981' : '#818cf8'; 
+      ctx.lineWidth = 3;
+      ctx.setLineDash(shape.color === '#10b981' ? [] : [6, 3]);
+
+      if (shape.type === 'freehand' && shape.points.length > 0) {
+        ctx.moveTo(shape.points[0].x, shape.points[0].y);
+        shape.points.forEach(p => ctx.lineTo(p.x, p.y));
+      } else if (shape.type === 'rectangular' && shape.points.length >= 2) {
+        const start = shape.points[0];
+        const end = shape.points[shape.points.length - 1];
+        ctx.rect(start.x, start.y, end.x - start.x, end.y - start.y);
+      } else if (shape.type === 'elliptic' && shape.points.length >= 2) {
+        const start = shape.points[0];
+        const end = shape.points[shape.points.length - 1];
+        const rx = Math.abs(end.x - start.x) / 2;
+        const ry = Math.abs(end.y - start.y) / 2;
+        const cx = (start.x + end.x) / 2;
+        const cy = (start.y + end.y) / 2;
+        ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+      }
+      ctx.stroke();
 
   // Canvas resize handler
   useEffect(() => {
@@ -676,6 +873,13 @@ export default function ROIEditor({
       }
     };
 
+  const clearShapes = () => {
+    setShapes([]);
+    setCurrentShape(null);
+    setIsSystemActive(false);
+    setPreviewMode('original');
+  };
+
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [currentShape, shapes, isSystemActive]);
@@ -715,6 +919,17 @@ export default function ROIEditor({
             </p>
           </div>
         </div>
+
+        <div className="flex items-center gap-3">
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-500 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-slate-50 transition-all"
+            >
+              <X size={14} />
+              Kapat
+            </button>
+          )}
 
         <div className="flex items-center gap-2">
           {onClose && (
@@ -784,6 +999,36 @@ export default function ROIEditor({
             />
           )}
         </AnimatePresence>
+
+        <div className={cn(
+          "absolute inset-0 flex items-center justify-center p-20 pointer-events-none transition-all duration-700",
+          previewMode === 'segmented' && "opacity-20"
+        )}>
+           <img 
+             src={displayImage}
+             alt="Source"
+             className={cn(
+               "max-w-[120%] max-h-[120%] object-contain transition-all duration-1000",
+               isAutoDetecting ? "blur-sm grayscale" : "opacity-70 brightness-110 saturate-[1.6]"
+             )}
+             style={{ filter: 'contrast(1.4) drop-shadow(0 0 50px rgba(16, 185, 129, 0.2))' }}
+           />
+        </div>
+
+        {previewMode === 'segmented' && getSegmentationClipPath() && (
+          <div className="absolute inset-0 flex items-center justify-center p-20 pointer-events-none bg-black/85 transition-all duration-700">
+            <img
+              src={displayImage}
+              alt="Segmented Source"
+              className="max-w-[120%] max-h-[120%] object-contain transition-all duration-1000"
+              style={{
+                clipPath: getSegmentationClipPath() || undefined,
+                filter: 'contrast(1.45) brightness(1.1) saturate(1.55) drop-shadow(0 0 40px rgba(16, 185, 129, 0.35))'
+              }}
+            />
+          </div>
+        )}
+
 
         {/* Original Image Layer */}
         <div className={cn(
