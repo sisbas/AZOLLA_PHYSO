@@ -209,6 +209,13 @@ export default function ROIEditor({ imageUrl, onSave, onClose }: ROIEditorProps)
 
   const getSegmentationClipPath = () => {
     if (shapes.length === 0) return null;
+    const roiShape = [...shapes].reverse().find((s) => s.points.length >= 2);
+    if (!roiShape) return null;
+
+    if (roiShape.type === 'rectangular' && roiShape.points.length >= 2) {
+      const start = roiShape.points[0];
+      const end = roiShape.points[roiShape.points.length - 1];
+
     const target = [...shapes].reverse().find((s) => s.points.length >= 2);
     if (!target) return null;
 
@@ -222,6 +229,9 @@ export default function ROIEditor({ imageUrl, onSave, onClose }: ROIEditorProps)
       return `polygon(${left}px ${top}px, ${right}px ${top}px, ${right}px ${bottom}px, ${left}px ${bottom}px)`;
     }
 
+    if (roiShape.type === 'elliptic' && roiShape.points.length >= 2) {
+      const start = roiShape.points[0];
+      const end = roiShape.points[roiShape.points.length - 1];
     if (target.type === 'elliptic' && target.points.length >= 2) {
       const start = target.points[0];
       const end = target.points[target.points.length - 1];
@@ -236,6 +246,12 @@ export default function ROIEditor({ imageUrl, onSave, onClose }: ROIEditorProps)
       });
       return `polygon(${ellipsePoints.join(',')})`;
     }
+
+    if (roiShape.points.length >= 3) {
+      return `polygon(${roiShape.points.map((p) => `${p.x}px ${p.y}px`).join(',')})`;
+    }
+
+    return null;
 
     if (target.points.length >= 3) {
       return `polygon(${target.points.map((p) => `${p.x}px ${p.y}px`).join(',')})`;
