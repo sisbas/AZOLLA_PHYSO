@@ -68,43 +68,126 @@ export default function ROIEditor({ imageUrl, onSave, onClose }: ROIEditorProps)
 
   const runAutoDetect = () => {
     setIsAutoDetecting(true);
-    // Simulate AI pixel-level segmentation
-    setTimeout(() => {
-      const rect = containerRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      
-      const width = rect.width;
-      const height = rect.height;
-      const cx = width / 2;
-      const cy = height / 2;
-      
-      // Generate an "organic" plant shape (rough convex hull simulation)
-      const points: { x: number; y: number }[] = [];
-      const numPoints = 24; // High resolution for the polygon
-      const baseRadius = Math.min(width, height) * 0.32;
-      
-      for (let i = 0; i <= numPoints; i++) {
-        const angle = (i / numPoints) * Math.PI * 2;
-        // Add "leafy" jitter to the radius
-        const jitter = (Math.sin(angle * 5) * 25) + (Math.cos(angle * 3) * 15) + (Math.random() * 10);
-        const r = baseRadius + jitter;
-        points.push({
-          x: cx + Math.cos(angle) * r,
-          y: cy + Math.sin(angle) * r
-        });
-      }
-      
-      const autoShape: Shape = {
-        id: 'auto-' + Date.now(),
-        type: 'freehand',
-        points: points,
-        color: '#10b981'
-      };
-      
-      setShapes([autoShape]);
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) {
       setIsAutoDetecting(false);
-      setShowConfirmModal(true);
-    }, 1800);
+      return;
+    }
+
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const containerW = rect.width;
+        const containerH = rect.height;
+        const scale = Math.min((containerW * 1.2) / img.width, (containerH * 1.2) / img.height);
+        const drawW = img.width * scale;
+        const drawH = img.height * scale;
+        const offsetX = (containerW - drawW) / 2;
+        const offsetY = (containerH - drawH) / 2;
+
+        const offscreen = document.createElement('canvas');
+        offscreen.width = Math.max(1, Math.round(drawW));
+        offscreen.height = Math.max(1, Math.round(drawH));
+        const ctx = offscreen.getContext('2d');
+        if (!ctx) throw new Error('Canvas context unavailable');
+        ctx.drawImage(img, 0, 0, offscreen.width, offscreen.height);
+
+        const imageData = ctx.getImageData(0, 0, offscreen.width, offscreen.height);
+        const data = imageData.data;
+        const mask = new Uint8Array(offscreen.width * offscreen.height);
+
+        for (let i = 0; i < data.length; i += 4) {
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
+          const exg = (2 * g) - r - b;
+          const isGreen = g > 40 && exg > 15 && g > r * 0.8 && g > b * 0.8;
+          mask[i / 4] = isGreen ? 1 : 0;
+        }
+
+        const visited = new Uint8Array(mask.length);
+        const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+        let bestComponent: number[] = [];
+
+        for (let y = 0; y < offscreen.height; y++) {
+          for (let x = 0; x < offscreen.width; x++) {
+            const idx = y * offscreen.width + x;
+            if (!mask[idx] || visited[idx]) continue;
+            const queue = [idx];
+            visited[idx] = 1;
+            const comp: number[] = [];
+            while (queue.length) {
+              const cur = queue.pop()!;
+              comp.push(cur);
+              const cx = cur % offscreen.width;
+              const cy = Math.floor(cur / offscreen.width);
+              for (const [dx, dy] of dirs) {
+                const nx = cx + dx, ny = cy + dy;
+                if (nx < 0 || ny < 0 || nx >= offscreen.width || ny >= offscreen.height) continue;
+                const nidx = ny * offscreen.width + nx;
+                if (!mask[nidx] || visited[nidx]) continue;
+                visited[nidx] = 1;
+                queue.push(nidx);
+              }
+            }
+            if (comp.length > bestComponent.length) bestComponent = comp;
+          }
+        }
+
+        if (bestComponent.length < 50) throw new Error('No strong component');
+
+        const pointSet = new Set(bestComponent);
+        const boundary: {x:number; y:number}[] = [];
+        for (const p of bestComponent) {
+          const x = p % offscreen.width;
+          const y = Math.floor(p / offscreen.width);
+          let edge = false;
+          for (const [dx, dy] of dirs) {
+            const nx = x + dx, ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= offscreen.width || ny >= offscreen.height || !pointSet.has(ny * offscreen.width + nx)) {
+              edge = true; break;
+            }
+          }
+          if (edge) boundary.push({x, y});
+        }
+
+        const cx = boundary.reduce((s, p) => s + p.x, 0) / boundary.length;
+        const cy = boundary.reduce((s, p) => s + p.y, 0) / boundary.length;
+        boundary.sort((a, b) => Math.atan2(a.y - cy, a.x - cx) - Math.atan2(b.y - cy, b.x - cx));
+
+        const sampled = boundary.filter((_, i) => i % Math.max(1, Math.floor(boundary.length / 80)) === 0);
+        const points = sampled.map((p) => ({ x: p.x + offsetX, y: p.y + offsetY }));
+
+        setShapes([{
+          id: 'auto-' + Date.now(),
+          type: 'freehand',
+          points,
+          color: '#10b981'
+        }]);
+        setShowConfirmModal(true);
+      } catch {
+        // Fallback: centered ellipse when image-based segmentation fails
+        const width = rect.width;
+        const height = rect.height;
+        setShapes([{
+          id: 'auto-' + Date.now(),
+          type: 'elliptic',
+          points: [
+            { x: width * 0.2, y: height * 0.2 },
+            { x: width * 0.8, y: height * 0.8 }
+          ],
+          color: '#10b981'
+        }]);
+        setShowConfirmModal(true);
+      } finally {
+        setIsAutoDetecting(false);
+      }
+    };
+    img.onerror = () => {
+      setIsAutoDetecting(false);
+    };
+    img.src = displayImage;
   };
 
   const handleActivate = () => {
@@ -159,9 +242,12 @@ export default function ROIEditor({ imageUrl, onSave, onClose }: ROIEditorProps)
     }
 
     return null;
+
+
     const target = [...shapes].reverse().find((s) => s.points.length >= 3);
     if (!target) return null;
     return `polygon(${target.points.map((p) => `${p.x}px ${p.y}px`).join(',')})`;
+
 
   };
 

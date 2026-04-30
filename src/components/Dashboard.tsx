@@ -466,6 +466,15 @@ export default function Dashboard({ taskId }: DashboardProps) {
                             <span className="text-[9px] font-bold text-white uppercase tracking-[0.2em]">{viewMode} ACTIVE</span>
                           </div>
                         </div>
+
+                        {/* Capture date/time */}
+                        <div className="absolute bottom-6 right-6 pointer-events-none">
+                          <div className="bg-black/70 backdrop-blur-md px-3 py-2 rounded-lg border border-white/10">
+                            <span className="text-[10px] font-mono font-bold text-white/90 uppercase tracking-wider">
+                              Çekim Tarihi: {currentFrame.timestamp || '-'}
+                            </span>
+                          </div>
+                        </div>
                      </div>
                   </div>
 
