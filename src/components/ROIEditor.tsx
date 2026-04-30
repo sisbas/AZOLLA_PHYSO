@@ -41,6 +41,7 @@ export default function ROIEditor({ imageUrl, onSave, onClose }: ROIEditorProps)
   const [isAutoDetecting, setIsAutoDetecting] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [isSystemActive, setIsSystemActive] = useState(false);
+  const [previewMode, setPreviewMode] = useState<'original' | 'segmented'>('original');
   
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -55,6 +56,7 @@ export default function ROIEditor({ imageUrl, onSave, onClose }: ROIEditorProps)
       reader.onloadend = () => {
         setUploadedImage(reader.result as string);
         clearShapes();
+        setPreviewMode('original');
       };
       reader.readAsDataURL(file);
     }
@@ -108,6 +110,7 @@ export default function ROIEditor({ imageUrl, onSave, onClose }: ROIEditorProps)
   const handleActivate = () => {
     setIsSystemActive(true);
     setShowConfirmModal(false);
+    setPreviewMode('segmented');
     // Animation effect
     setTimeout(() => {
       // Small feedback alert or redirect
@@ -120,6 +123,13 @@ export default function ROIEditor({ imageUrl, onSave, onClose }: ROIEditorProps)
     { id: 'elliptic' as Tool, label: 'Eliptik', icon: Circle },
     { id: 'rectangular' as Tool, label: 'Dikdörtgen', icon: Square },
   ];
+
+  const getSegmentationClipPath = () => {
+    if (shapes.length === 0) return null;
+    const target = [...shapes].reverse().find((s) => s.points.length >= 3);
+    if (!target) return null;
+    return `polygon(${target.points.map((p) => `${p.x}px ${p.y}px`).join(',')})`;
+  };
 
   const drawShapes = (ctx: CanvasRenderingContext2D) => {
     ctx.clearRect(0, 0, ctx.canvas.width / (window.devicePixelRatio || 1), ctx.canvas.height / (window.devicePixelRatio || 1));
@@ -199,6 +209,7 @@ export default function ROIEditor({ imageUrl, onSave, onClose }: ROIEditorProps)
     setShapes([]);
     setCurrentShape(null);
     setIsSystemActive(false);
+    setPreviewMode('original');
   };
 
   useEffect(() => {
@@ -277,7 +288,10 @@ export default function ROIEditor({ imageUrl, onSave, onClose }: ROIEditorProps)
           />
         )}
 
-        <div className="absolute inset-0 flex items-center justify-center p-20 pointer-events-none">
+        <div className={cn(
+          "absolute inset-0 flex items-center justify-center p-20 pointer-events-none transition-all duration-700",
+          previewMode === 'segmented' && "opacity-20"
+        )}>
            <img 
              src={displayImage}
              alt="Source"
@@ -288,6 +302,20 @@ export default function ROIEditor({ imageUrl, onSave, onClose }: ROIEditorProps)
              style={{ filter: 'contrast(1.4) drop-shadow(0 0 50px rgba(16, 185, 129, 0.2))' }}
            />
         </div>
+
+        {previewMode === 'segmented' && getSegmentationClipPath() && (
+          <div className="absolute inset-0 flex items-center justify-center p-20 pointer-events-none bg-black/85 transition-all duration-700">
+            <img
+              src={displayImage}
+              alt="Segmented Source"
+              className="max-w-[120%] max-h-[120%] object-contain transition-all duration-1000"
+              style={{
+                clipPath: getSegmentationClipPath() || undefined,
+                filter: 'contrast(1.45) brightness(1.1) saturate(1.55) drop-shadow(0 0 40px rgba(16, 185, 129, 0.35))'
+              }}
+            />
+          </div>
+        )}
 
         <canvas 
           ref={canvasRef}
