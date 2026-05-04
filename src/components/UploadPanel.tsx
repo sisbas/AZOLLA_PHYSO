@@ -11,6 +11,8 @@ export default function UploadPanel({ onComplete }: UploadPanelProps) {
   const [files, setFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [pipelineStage, setPipelineStage] = useState<string>('queued');
+  const [currentFile, setCurrentFile] = useState<string>('');
   const [error, setError] = useState<{ message: string; remediation?: string } | null>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -87,10 +89,13 @@ export default function UploadPanel({ onComplete }: UploadPanelProps) {
           
           const statusData = await res.json();
           setProgress(statusData.progress);
+          setPipelineStage(statusData.stage || 'processing');
+          setCurrentFile(statusData.current_file || '');
           
-          if (statusData.status === 'completed') {
+          if (statusData.status === 'completed' || statusData.status === 'completed_with_errors') {
             clearInterval(poll);
             onComplete(data.task_id);
+            setIsUploading(false);
           } else if (statusData.status === 'failed') {
             clearInterval(poll);
             setError({
@@ -223,6 +228,10 @@ export default function UploadPanel({ onComplete }: UploadPanelProps) {
                <div className="flex justify-between text-[9px] font-bold uppercase text-slate-400 tracking-widest">
                   <span>Pipeline Sync</span>
                   <span>{progress === 100 ? 'COMPLETE' : 'STREAMING...'}</span>
+               </div>
+               <div className="flex justify-between text-[9px] text-slate-500 font-mono">
+                  <span>Stage: {pipelineStage}</span>
+                  <span className="truncate max-w-[220px] text-right">{currentFile || 'Hazırlanıyor'}</span>
                </div>
                <div className="h-1.5 bg-slate-50 rounded-full overflow-hidden">
                 <motion.div 
