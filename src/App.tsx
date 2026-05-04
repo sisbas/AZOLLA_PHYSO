@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Layout, FlaskConical, History, Settings, Upload, Activity, AlertCircle, ChevronRight, Play, Pause } from 'lucide-react';
+import { Layout, FlaskConical, History, Settings, Upload, Activity, AlertCircle, ChevronRight, Play, Pause, Microscope } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -7,12 +7,13 @@ import Dashboard from './components/Dashboard';
 import UploadPanel from './components/UploadPanel';
 import SettingsView from './components/SettingsView';
 import ROIEditor from './components/ROIEditor';
+import PhenotypingView from './components/PhenotypingView';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export type ViewState = 'upload' | 'analysis' | 'settings' | 'roi';
+export type ViewState = 'upload' | 'analysis' | 'settings' | 'roi' | 'phenotyping';
 
 export default function App() {
   const [view, setView] = useState<ViewState>('roi');
@@ -80,6 +81,18 @@ export default function App() {
               Analiz Vizualizasyonu
             </button>
             <button 
+              onClick={() => setView('phenotyping')}
+              className={cn(
+                "px-5 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all",
+                view === 'phenotyping' ? "bg-emerald-100 text-emerald-700 shadow-inner" : "text-slate-400 hover:text-emerald-600 hover:bg-emerald-50"
+              )}
+            >
+              <span className="flex items-center gap-2">
+                <Microscope size={12} />
+                Fenotipleme
+              </span>
+            </button>
+            <button 
               onClick={() => setView('settings')}
               className={cn(
                 "px-5 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all",
@@ -113,7 +126,7 @@ export default function App() {
 
       <main className={cn(
         "mx-auto min-h-[calc(100vh-64px)]",
-        view === 'analysis' || view === 'roi' ? "w-full" : "max-w-[1400px]"
+        view === 'analysis' || view === 'roi' || view === 'phenotyping' ? "w-full" : "max-w-[1400px]"
       )}>
         <AnimatePresence mode="wait">
           {view === 'upload' ? (
@@ -145,6 +158,16 @@ export default function App() {
               className="h-full"
             >
               <Dashboard taskId={taskId!} />
+            </motion.div>
+          ) : view === 'phenotyping' ? (
+            <motion.div
+              key="phenotyping"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="h-full"
+            >
+              <PhenotypingView />
             </motion.div>
           ) : (
             <motion.div

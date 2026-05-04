@@ -17,7 +17,8 @@ from backend.core import (
     BiomassIsolationModule,
     FrondSegmenterModule,
     DLFallbackModule,
-    ValidationModule
+    ValidationModule,
+    PhenotypingModule
 )
 
 class AzollaPipeline:
@@ -42,6 +43,7 @@ class AzollaPipeline:
         self.frond = FrondSegmenterModule(self.config)
         self.dl = DLFallbackModule(self.config)
         self.val = ValidationModule(self.config)
+        self.pheno = PhenotypingModule(self.config)  # Fenotipleme modülü
         
         self.output_base = Path(self.config['output']['base_dir'])
 
@@ -52,7 +54,7 @@ class AzollaPipeline:
         )
 
     def run_single_frame(self, img_bgr: np.ndarray, timestamp: str, experiment_id: str) -> Dict[str, Any]:
-        """Runs the 10-step logic on a single image frame."""
+        """Runs the 10-step logic on a single image frame with phenotyping."""
         img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
         out_dir = self.output_base / experiment_id / timestamp.replace(":", "-")
         
@@ -73,6 +75,10 @@ class AzollaPipeline:
         # 4. Feature Extraction
         feature_record = self.feat.process_frame(std_res.img_clean, opt_mask, timestamp)
         all_errors.extend(feature_record.errors)
+        
+        # 5. Fenotipleme ve Biyokütle Tahmini (YENİ)
+        phenotype_metrics = self.pheno.process(img_rgb, opt_mask)
+        all_errors.extend(phenotype_metrics.errors)
         
         # 8 & 9. Frond Segmenter (with Fallback)
         labels, frond_qc = self.frond.process(opt_mask)
@@ -99,6 +105,7 @@ class AzollaPipeline:
                 **ps_metrics,
                 **{k: v for k, v in feature_record.__dict__.items() if k != 'errors'}
             },
+            "phenotyping": self.pheno.to_dict(phenotype_metrics),  # Fenotipleme sonuçları ekle
             "segmentation": segmentation_outputs,  # Add detailed segmentation outputs
             "status": opt_status,
             "errors": all_errors,
@@ -116,7 +123,8 @@ class AzollaPipeline:
             "heatmap": heatmap,
             "overlay": overlay,
             "isolated": isolated,
-            "metrics": results["metrics"]
+            "metrics": results["metrics"],
+            "phenotyping": results["phenotyping"]
         })
         
         return results
