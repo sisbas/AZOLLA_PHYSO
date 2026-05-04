@@ -11,6 +11,7 @@ from .dl_fallback import DLFallbackModule
 from .validation import ValidationModule
 from .image_preprocessor import ImagePreprocessor, preprocess_image, PreprocessingMetadata, PreprocessingResult
 from .azolla_isolator import AzollaIsolator, isolate_azolla, IsolationResult, SegmentationMetrics
+from .phenotyping import PhenotypingModule, PhenotypeMetrics
 
 __all__ = [
     "StandardizationModule",
@@ -34,4 +35,7 @@ __all__ = [
     "isolate_azolla",
     "IsolationResult",
     "SegmentationMetrics",
+    # Fenotipleme Modülü
+    "PhenotypingModule",
+    "PhenotypeMetrics",
 ]
