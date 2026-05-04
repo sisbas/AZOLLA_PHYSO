@@ -26,8 +26,10 @@ interface MulterRequest extends Request {
 
 interface Task {
   id: string;
-  status: "processing" | "completed" | "failed";
+  status: "processing" | "completed" | "completed_with_errors" | "failed";
   progress: number;
+  stage?: string;
+  current_file?: string;
   results?: any;
   error?: string;
 }
@@ -92,12 +94,13 @@ async function startServer() {
       const experimentId = req.body.experiment_id || uuidv4();
       const taskId = uuidv4();
 
-      tasks[taskId] = { id: taskId, status: "processing", progress: 0 };
+      tasks[taskId] = { id: taskId, status: "processing", progress: 0, stage: "queued" };
 
       // Run pipeline in background
       processImages(taskId, files).catch((err) => {
         console.error("Pipeline Error:", err);
         tasks[taskId].status = "failed";
+    tasks[taskId].stage = "failed";
         tasks[taskId].error = err.message;
       });
 
@@ -341,6 +344,8 @@ async function processImages(taskId: string, files: Express.Multer.File[]) {
     
     try {
       tasks[taskId].progress = Math.round((i / total) * 100);
+      tasks[taskId].stage = "running_python_pipeline";
+      tasks[taskId].current_file = file.originalname;
       
       logger.info(`Processing file ${i+1}/${total}: ${file.originalname}`);
       
@@ -405,7 +410,9 @@ async function processImages(taskId: string, files: Express.Multer.File[]) {
   // Check if all files failed
   if (results.filter(r => r.status === "failed").length === total && total > 0) {
     tasks[taskId].status = "failed";
+    tasks[taskId].stage = "failed";
     tasks[taskId].error = `Hiçbir görüntü başarıyla işlenemedi (${total} dosya başarısız).`;
+    tasks[taskId].current_file = undefined;
     tasks[taskId].results = {
       experiment_id: uuidv4(),
       timeline: results,
@@ -432,6 +439,8 @@ async function processImages(taskId: string, files: Express.Multer.File[]) {
       }
     };
     tasks[taskId].status = failedCount > 0 ? "completed_with_errors" : "completed";
+    tasks[taskId].stage = failedCount > 0 ? "completed_with_errors" : "completed";
+    tasks[taskId].current_file = undefined;
     
     logger.info(`Task ${taskId} completed: ${successCount}/${total} successful`);
   }
