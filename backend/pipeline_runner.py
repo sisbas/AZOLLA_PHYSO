@@ -109,10 +109,11 @@ class AzollaPipeline:
             "segmentation": segmentation_outputs,  # Add detailed segmentation outputs
             "status": opt_status,
             "errors": all_errors,
-            "image_paths": {
-                "rgb": f"{experiment_id}/{timestamp}/rgb.png",
-                "pseudocolor": f"{experiment_id}/{timestamp}/heatmap.png",
-                "overlay": f"{experiment_id}/{timestamp}/overlay.png"
+            "image_urls": {
+                "rgb": f"/media/{experiment_id}/{timestamp.replace(':', '-')}/rgb.png",
+                "pseudocolor": f"/media/{experiment_id}/{timestamp.replace(':', '-')}/heatmap.png",
+                "overlay": f"/media/{experiment_id}/{timestamp.replace(':', '-')}/overlay.png",
+                "isolated": f"/media/{experiment_id}/{timestamp.replace(':', '-')}/isolated.png"
             }
         }
         
