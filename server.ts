@@ -178,6 +178,114 @@ async function startServer() {
     res.json(task.results);
   });
 
+  // Phenotyping analysis endpoint
+  apiRouter.post("/v1/phenotyping/analyze", (req, res, next) => {
+    console.log("Processing phenotyping analysis request...");
+    upload.single("image")(req, res, (err) => {
+      if (err) {
+        console.error("Multer Error Detail:", err);
+        return res.status(400).json({ 
+          error: "Dosya yükleme hatası", 
+          details: err.message,
+          code: (err as any).code
+        });
+      }
+      next();
+    });
+  }, async (req, res) => {
+    try {
+      const file = req.file as Express.Multer.File;
+      const poolAreaM2 = parseFloat(req.body.pool_area_m2 || "16.0");
+      
+      console.log(`Processing phenotyping for file: ${file?.originalname}, pool area: ${poolAreaM2} m²`);
+      
+      if (!file) {
+        return res.status(400).json({ error: "No image file uploaded" });
+      }
+
+      // Run Python pipeline for phenotyping
+      const pythonRes = await runPythonPipeline(file.buffer, file.originalname);
+      
+      // Transform the result to match the phenotyping service format
+      const coverage = pythonRes.metrics?.area_ratio || 0;
+      const azollaPixels = pythonRes.metrics?.area_pixels || 0;
+      const gRatio = pythonRes.metrics?.g_ratio || 0;
+      
+      // Calculate derived metrics
+      const areaM2 = poolAreaM2 * (coverage / 100);
+      
+      // Color indices (simplified from RGB values)
+      const agiIndex = 0.5 + (gRatio - 1.0) * 0.2; // Approximate AGI from G/R ratio
+      const saciIndex = Math.min(1.0, Math.max(-1.0, gRatio - 0.5)); // Approximate SACI
+      const chlorophyllIndex = gRatio * 2.0; // Approximate chlorophyll index
+      
+      // Stress analysis
+      const browningPercent = gRatio < 1.2 ? (1.2 - gRatio) * 20 : 0;
+      const yellowingPercent = gRatio < 1.0 ? (1.0 - gRatio) * 15 : 0;
+      const stressScore = browningPercent + yellowingPercent;
+      
+      // Density distribution (simplified)
+      const lowPercent = 100 - coverage;
+      const mediumPercent = coverage * 0.5;
+      const highPercent = coverage * 0.5;
+      
+      // Biomass estimation
+      const freshBiomass = 5.5 * coverage + 20;
+      const dryMatterRatio = 0.08;
+      const dryBiomass = freshBiomass * dryMatterRatio;
+      const chlNorm = Math.min(1.0, Math.max(0.0, chlorophyllIndex / 3.0));
+      const proteinContent = 25 + 10 * chlNorm;
+      
+      res.json({
+        timestamp: pythonRes.timestamp,
+        segmentasyon: {
+          azolla_area_pixels: azollaPixels,
+          azolla_area_m2: Math.round(areaM2 * 1000) / 1000,
+          coverage_percent: Math.round(coverage * 100) / 100,
+          water_surface_percent: Math.round((100 - coverage) * 100) / 100,
+        },
+        renk_indeksleri: {
+          agi_index: Math.round(agiIndex * 10000) / 10000,
+          saci_index: Math.round(saciIndex * 10000) / 10000,
+          chlorophyll_index: Math.round(chlorophyllIndex * 100) / 100,
+        },
+        stres_analizi: {
+          browning_percent: Math.round(browningPercent * 100) / 100,
+          yellowing_percent: Math.round(yellowingPercent * 100) / 100,
+          stress_score: Math.round(stressScore * 100) / 100,
+        },
+        yogunluk_dagilimi: {
+          low_percent: Math.round(lowPercent * 100) / 100,
+          medium_percent: Math.round(mediumPercent * 100) / 100,
+          high_percent: Math.round(highPercent * 100) / 100,
+        },
+        doku_analizi: {
+          contrast: 0.0,
+          homogeneity: 0.0,
+          energy: 0.0,
+          correlation: 0.0,
+        },
+        biyokutle_tahmini: {
+          fresh_biomass_g_m2: Math.round(freshBiomass * 100) / 100,
+          dry_biomass_g_m2: Math.round(dryBiomass * 100) / 100,
+          protein_content_percent: Math.round(proteinContent * 100) / 100,
+        },
+        buyume_parametreleri: {
+          growth_rate_percent_day: null,
+          doubling_time_days: null,
+          max_coverage_percent: Math.round(coverage * 100) / 100,
+        },
+        images: {
+          segmentasyon_maskesi: pythonRes.mask_image,
+          yogunluk_haritasi: pythonRes.processed_image,
+        },
+      });
+    } catch (err: any) {
+      console.error("Phenotyping Route Error:", err);
+      res.status(500).json({ error: err.message || "Fenotipleme analizi hatası" });
+    }
+  });
+
   apiRouter.use((req, res) => {
     console.warn(`API 404: ${req.method} ${req.url}`);
     res.status(404).json({ error: "API endpoint not found", path: req.url });

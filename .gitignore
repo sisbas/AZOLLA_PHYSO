@@ -1,35 +1,11 @@
 ```
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-
 # Dependencies
-.venv/
-venv/
-env/
-.env
-.env.local
-.env.*
+node_modules/
 
-# Logs
+# Logs and temp files
 *.log
-
-# Editor/IDE
-.vscode/
-.idea/
-*.swp
-*.swo
 *.tmp
 
-# Coverage
-.coverage
-coverage/
-htmlcov/
-
-# Build artifacts
-dist/
-build/
-target/
+# Editors
+.vscode/
 ```
