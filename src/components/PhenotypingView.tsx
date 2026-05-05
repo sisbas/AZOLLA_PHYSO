@@ -260,7 +260,7 @@ export default function PhenotypingView() {
               unit="m²"
               icon={Maximize2}
               color="emerald"
-              description={`${data.segmentazion.coverage_percent}% görüntü kaplaması`}
+              description={`${data.segmentasyon.coverage_percent}% görüntü kaplaması`}
             />
             <MetricCard
               title="Kaplama Yüzdesi"
