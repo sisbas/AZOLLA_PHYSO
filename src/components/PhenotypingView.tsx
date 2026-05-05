@@ -122,76 +122,41 @@ const MetricCard: React.FC<MetricCardProps> = ({
 
 export default function PhenotypingView() {
   const [data, setData] = useState<PhenotypingData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [poolArea, setPoolArea] = useState(16);
+  const [segmentationMask, setSegmentationMask] = useState<string | null>(null);
+  const [densityMap, setDensityMap] = useState<string | null>(null);
 
-  // Demo data - gerçek API'den gelecek
-  useEffect(() => {
-    const fetchPhenotypingData = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        
-        // Simüle edilmiş veri - gerçek implementasyonda API'den gelecek
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        const mockData: PhenotypingData = {
-          segmentasyon: {
-            azolla_area_pixels: 1245678,
-            azolla_area_m2: 12.46,
-            coverage_percent: 78.3,
-            water_surface_percent: 21.7
-          },
-          renk_indeksleri: {
-            agi_index: 0.65,
-            saci_index: 0.42,
-            chlorophyll_index: 1.85
-          },
-          stres_analizi: {
-            browning_percent: 2.1,
-            yellowing_percent: 1.8,
-            stress_score: 3.2
-          },
-          yogunluk_dagilimi: {
-            low_percent: 15.0,
-            medium_percent: 45.0,
-            high_percent: 40.0
-          },
-          doku_analizi: {
-            contrast: 0.45,
-            homogeneity: 0.78,
-            energy: 0.32,
-            correlation: 0.89
-          },
-          biyokutle_tahmini: {
-            fresh_biomass_g_m2: 460.5,
-            dry_biomass_g_m2: 36.8,
-            protein_content_percent: 31.5
-          },
-          buyume_parametreleri: {
-            growth_rate_percent_day: 12.5,
-            doubling_time_days: 5.5,
-            max_coverage_percent: 78.3
-          }
-        };
-        
-        setData(mockData);
-        setLoading(false);
-      } catch (err: any) {
-        setError(err.message || 'Veri yüklenirken hata oluştu');
-        setLoading(false);
+  const handleAnalyze = async (file: File) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const form = new FormData();
+      form.append('image', file);
+      form.append('pool_area_m2', String(poolArea));
+      const res = await fetch('/api/v1/phenotyping/analyze', { method: 'POST', body: form });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `API hatası (${res.status})`);
       }
-    };
-
-    fetchPhenotypingData();
-  }, []);
+      const result = await res.json();
+      setData(result);
+      setSegmentationMask(result.images?.segmentasyon_maskesi ?? null);
+      setDensityMap(result.images?.yogunluk_haritasi ?? null);
+    } catch (err: any) {
+      setError(err.message || 'Analiz sırasında hata oluştu');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   if (loading) {
     return (
       <div className="min-h-screen bg-[#f8fafc] p-8 flex items-center justify-center">
         <div className="text-center">
           <RefreshCw className="animate-spin mx-auto mb-4 text-slate-400" size={32} />
-          <p className="text-sm font-bold text-slate-500 uppercase tracking-widest">Fenotipleme verileri yükleniyor...</p>
+          <p className="text-sm font-bold text-slate-500 uppercase tracking-widest">Fenotipleme analizi çalışıyor...</p>
         </div>
       </div>
     );
@@ -204,12 +169,21 @@ export default function PhenotypingView() {
           <AlertCircle className="mx-auto mb-4 text-rose-500" size={48} />
           <h2 className="text-lg font-black text-slate-900 mb-2">Veri Yüklenemedi</h2>
           <p className="text-sm text-slate-500 mb-4">{error || 'Veri bulunamadı'}</p>
-          <button 
-            onClick={() => window.location.reload()}
-            className="px-6 py-2 bg-slate-900 text-white text-xs font-bold uppercase tracking-widest rounded-xl hover:bg-slate-800 transition-colors"
-          >
-            Yeniden Dene
-          </button>
+          <div className="space-y-3">
+            <input
+              type="number"
+              value={poolArea}
+              onChange={(e) => setPoolArea(Number(e.target.value || 16))}
+              className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
+              placeholder="Havuz alanı (m²)"
+            />
+            <input
+              type="file"
+              accept="image/png,image/jpeg"
+              onChange={(e) => e.target.files?.[0] && handleAnalyze(e.target.files[0])}
+              className="w-full text-xs"
+            />
+          </div>
         </div>
       </div>
     );
@@ -256,7 +230,7 @@ export default function PhenotypingView() {
               </button>
               <button className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white text-xs font-bold uppercase tracking-widest rounded-xl hover:bg-slate-800 transition-colors">
                 <RefreshCw size={14} />
-                Yenile
+                Yeni Görüntü İçin Sol Paneli Kullan
               </button>
             </div>
           </div>
@@ -267,6 +241,12 @@ export default function PhenotypingView() {
       <div className="max-w-[1600px] mx-auto p-8">
         {/* Segmentasyon ve Alan Metrikleri */}
         <div className="mb-8">
+          {(segmentationMask || densityMap) && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+              {segmentationMask && <img src={segmentationMask} alt="Segmentasyon maskesi" className="rounded-2xl border border-slate-200 bg-white" />}
+              {densityMap && <img src={densityMap} alt="Yoğunluk haritası" className="rounded-2xl border border-slate-200 bg-white" />}
+            </div>
+          )}
           <div className="flex items-center gap-2 mb-4">
             <Layers size={16} className="text-slate-400" />
             <h2 className="text-[10px] font-black uppercase tracking-widest text-slate-500">

@@ -13,7 +13,7 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export type ViewState = 'upload' | 'analysis' | 'settings' | 'roi' | 'phenotyping';
+export type ViewState = 'upload' | 'analysis' | 'settings' | 'roi' | 'phenotyping' | 'azolla-rgb';
 
 export default function App() {
   const [view, setView] = useState<ViewState>('roi');
@@ -92,6 +92,15 @@ export default function App() {
                 Fenotipleme
               </span>
             </button>
+            <button
+              onClick={() => setView('azolla-rgb')}
+              className={cn(
+                "px-5 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all",
+                view === 'azolla-rgb' ? "bg-teal-100 text-teal-700 shadow-inner" : "text-slate-400 hover:text-teal-600 hover:bg-teal-50"
+              )}
+            >
+              Azolla-RGB Sistem
+            </button>
             <button 
               onClick={() => setView('settings')}
               className={cn(
@@ -159,7 +168,7 @@ export default function App() {
             >
               <Dashboard taskId={taskId!} />
             </motion.div>
-          ) : view === 'phenotyping' ? (
+          ) : view === 'phenotyping' || view === 'azolla-rgb' ? (
             <motion.div
               key="phenotyping"
               initial={{ opacity: 0 }}
