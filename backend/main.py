@@ -12,6 +12,7 @@ from pathlib import Path
 from uuid import uuid4
 from datetime import datetime
 from backend.pipeline_runner import AzollaPipeline
+from backend.phenotyping_service import AzollaPhenotypingService
 
 app = FastAPI(title="Azolla Early Stress Detection API", version="1.2.4")
 
@@ -19,6 +20,7 @@ app = FastAPI(title="Azolla Early Stress Detection API", version="1.2.4")
 tasks = {}
 CONFIG_PATH = "backend/config.yaml"
 pipeline = AzollaPipeline(CONFIG_PATH)
+phenotyping_service = AzollaPhenotypingService()
 
 # Ensure output directory for serving images
 OUTPUT_DIR = Path("results")
@@ -89,6 +91,16 @@ async def get_task_results(task_id: str):
     if task_id not in tasks or tasks[task_id]["status"] != "completed":
         raise HTTPException(status_code=400, detail="Results not ready or task failed")
     return tasks[task_id]["result"]
+
+
+@app.post("/api/v1/phenotyping/analyze")
+async def analyze_phenotyping(image: UploadFile = File(...), pool_area_m2: float = 16.0):
+    contents = await image.read()
+    nparr = np.frombuffer(contents, np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if img is None:
+        raise HTTPException(status_code=400, detail="Geçersiz görüntü dosyası.")
+    return phenotyping_service.analyze(img, pool_area_m2=pool_area_m2)
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=3000)
