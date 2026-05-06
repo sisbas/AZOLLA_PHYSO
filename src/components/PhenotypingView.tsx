@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { cn } from '../App';
 import { 
@@ -47,8 +47,8 @@ interface PhenotypingData {
     protein_content_percent: number;
   };
   buyume_parametreleri: {
-    growth_rate_percent_day: number;
-    doubling_time_days: number;
+    growth_rate_percent_day: number | null;
+    doubling_time_days: number | null;
     max_coverage_percent: number;
   };
   errors?: any[];
@@ -63,6 +63,15 @@ interface MetricCardProps {
   description?: string;
   color?: string;
 }
+
+const DEFAULT_POOL_AREA_M2 = 16;
+
+const formatNullableMetric = (
+  value: number | null | undefined,
+  { prefix = '', suffix = '', digits = 1 }: { prefix?: string; suffix?: string; digits?: number } = {}
+) => (
+  typeof value === 'number' && Number.isFinite(value) ? `${prefix}${value.toFixed(digits)}${suffix}` : 'Veri yok'
+);
 
 const MetricCard: React.FC<MetricCardProps> = ({ 
   title, value, unit, icon: Icon, trend, description, color = 'slate' 
@@ -124,17 +133,23 @@ export default function PhenotypingView() {
   const [data, setData] = useState<PhenotypingData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [poolArea, setPoolArea] = useState(16);
+  const [poolArea, setPoolArea] = useState(String(DEFAULT_POOL_AREA_M2));
   const [segmentationMask, setSegmentationMask] = useState<string | null>(null);
   const [densityMap, setDensityMap] = useState<string | null>(null);
 
   const handleAnalyze = async (file: File) => {
+    const parsedPoolArea = Number(poolArea);
+    if (!Number.isFinite(parsedPoolArea) || parsedPoolArea <= 0) {
+      setError('Havuz alanı 0’dan büyük geçerli bir sayı olmalıdır.');
+      return;
+    }
+
     setLoading(true);
     setError(null);
     try {
       const form = new FormData();
       form.append('image', file);
-      form.append('pool_area_m2', String(poolArea));
+      form.append('pool_area_m2', String(parsedPoolArea));
       const res = await fetch('/api/v1/phenotyping/analyze', { method: 'POST', body: form });
       if (!res.ok) {
         const text = await res.text();
@@ -162,27 +177,44 @@ export default function PhenotypingView() {
     );
   }
 
-  if (error || !data) {
+  if (!data) {
     return (
       <div className="min-h-screen bg-[#f8fafc] p-8 flex items-center justify-center">
-        <div className="text-center max-w-md">
-          <AlertCircle className="mx-auto mb-4 text-rose-500" size={48} />
-          <h2 className="text-lg font-black text-slate-900 mb-2">Veri Yüklenemedi</h2>
-          <p className="text-sm text-slate-500 mb-4">{error || 'Veri bulunamadı'}</p>
-          <div className="space-y-3">
-            <input
-              type="number"
-              value={poolArea}
-              onChange={(e) => setPoolArea(Number(e.target.value || 16))}
-              className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
-              placeholder="Havuz alanı (m²)"
-            />
-            <input
-              type="file"
-              accept="image/png,image/jpeg"
-              onChange={(e) => e.target.files?.[0] && handleAnalyze(e.target.files[0])}
-              className="w-full text-xs"
-            />
+        <div className="w-full max-w-md rounded-3xl bg-white border border-slate-200 p-8 text-center shadow-sm">
+          <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600">
+            {error ? <AlertCircle size={30} className="text-rose-500" /> : <Microscope size={30} />}
+          </div>
+          <h2 className="text-lg font-black text-slate-900 mb-2">Fenotipleme Analizi Başlat</h2>
+          <p className="text-sm text-slate-500 mb-5">
+            Havuz alanını girip bir RGB görüntü yükleyerek Azolla kaplama ve biyokütle analizini çalıştırın.
+          </p>
+          {error && (
+            <div className="mb-4 rounded-xl border border-rose-100 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600">
+              {error}
+            </div>
+          )}
+          <div className="space-y-3 text-left">
+            <label className="block text-[10px] font-black uppercase tracking-widest text-slate-500">
+              Havuz alanı (m²)
+              <input
+                type="number"
+                min="0.01"
+                step="0.01"
+                value={poolArea}
+                onChange={(e) => setPoolArea(e.target.value)}
+                className="mt-2 w-full px-3 py-2 rounded-lg border border-slate-300 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                placeholder="16"
+              />
+            </label>
+            <label className="block text-[10px] font-black uppercase tracking-widest text-slate-500">
+              Görüntü dosyası
+              <input
+                type="file"
+                accept="image/png,image/jpeg"
+                onChange={(e) => e.target.files?.[0] && handleAnalyze(e.target.files[0])}
+                className="mt-2 w-full rounded-lg border border-dashed border-slate-300 px-3 py-3 text-xs text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-emerald-50 file:px-3 file:py-2 file:text-xs file:font-bold file:text-emerald-700"
+              />
+            </label>
           </div>
         </div>
       </div>
@@ -496,10 +528,10 @@ export default function PhenotypingView() {
                   </div>
                   <div>
                     <div className="text-[9px] font-bold text-amber-600 uppercase">Büyüme Hızı</div>
-                    <div className="text-xs font-black text-amber-900">%{data.buyume_parametreleri.growth_rate_percent_day.toFixed(1)} / gün</div>
+                    <div className="text-xs font-black text-amber-900">{formatNullableMetric(data.buyume_parametreleri.growth_rate_percent_day, { prefix: '%', suffix: ' / gün' })}</div>
                   </div>
                 </div>
-                {data.buyume_parametreleri.growth_rate_percent_day > 10 && (
+                {(data.buyume_parametreleri.growth_rate_percent_day ?? 0) > 10 && (
                   <CheckCircle2 size={18} className="text-emerald-500" />
                 )}
               </div>
@@ -511,7 +543,7 @@ export default function PhenotypingView() {
                   </div>
                   <div>
                     <div className="text-[9px] font-bold text-blue-600 uppercase">Katlanma Süresi</div>
-                    <div className="text-xs font-black text-blue-900">{data.buyume_parametreleri.doubling_time_days.toFixed(1)} gün</div>
+                    <div className="text-xs font-black text-blue-900">{formatNullableMetric(data.buyume_parametreleri.doubling_time_days, { suffix: ' gün' })}</div>
                   </div>
                 </div>
               </div>
