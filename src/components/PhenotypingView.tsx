@@ -180,7 +180,7 @@ export default function PhenotypingView() {
   if (!data) {
     return (
       <div className="min-h-screen bg-[#f8fafc] p-8 flex items-center justify-center">
-        <div className="w-full max-w-md rounded-3xl bg-white border border-slate-200 p-8 text-center shadow-sm">
+        <div className="w-full max-w-2xl rounded-3xl bg-white border border-slate-200 p-8 text-center shadow-sm">
           <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600">
             {error ? <AlertCircle size={30} className="text-rose-500" /> : <Microscope size={30} />}
           </div>
@@ -193,6 +193,23 @@ export default function PhenotypingView() {
               {error}
             </div>
           )}
+          
+          {/* Mode Toggle */}
+          <div className="flex items-center justify-center gap-2 mb-6">
+            <button
+              onClick={() => setMode('single')}
+              className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest ${mode === 'single' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'}`}
+            >
+              Tek Görüntü
+            </button>
+            <button
+              onClick={() => setMode('batch')}
+              className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest ${mode === 'batch' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'}`}
+            >
+              Batch Karşılaştırma
+            </button>
+          </div>
+          
           <div className="space-y-3 text-left">
             <label className="block text-[10px] font-black uppercase tracking-widest text-slate-500">
               Havuz alanı (m²)
@@ -206,15 +223,29 @@ export default function PhenotypingView() {
                 placeholder="16"
               />
             </label>
-            <label className="block text-[10px] font-black uppercase tracking-widest text-slate-500">
-              Görüntü dosyası
-              <input
-                type="file"
-                accept="image/png,image/jpeg"
-                onChange={(e) => e.target.files?.[0] && handleAnalyze(e.target.files[0])}
-                className="mt-2 w-full rounded-lg border border-dashed border-slate-300 px-3 py-3 text-xs text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-emerald-50 file:px-3 file:py-2 file:text-xs file:font-bold file:text-emerald-700"
-              />
-            </label>
+            
+            {mode === 'single' ? (
+              <label className="block text-[10px] font-black uppercase tracking-widest text-slate-500">
+                Görüntü dosyası
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg"
+                  onChange={(e) => e.target.files?.[0] && handleAnalyze(e.target.files[0])}
+                  className="mt-2 w-full rounded-lg border border-dashed border-slate-300 px-3 py-3 text-xs text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-emerald-50 file:px-3 file:py-2 file:text-xs file:font-bold file:text-emerald-700"
+                />
+              </label>
+            ) : (
+              <label className="block text-[10px] font-black uppercase tracking-widest text-slate-500">
+                Birden fazla görüntü seçin (tarihsel sıralama için dosya adlarında tarih bulunsun: YYYY-MM-DD)
+                <input
+                  type="file"
+                  multiple
+                  accept="image/png,image/jpeg"
+                  onChange={(e) => e.target.files && handleBatchUpload(e.target.files)}
+                  className="mt-2 w-full rounded-lg border border-dashed border-slate-300 px-3 py-3 text-xs text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-emerald-50 file:px-3 file:py-2 file:text-xs file:font-bold file:text-emerald-700"
+                />
+              </label>
+            )}
           </div>
         </div>
       </div>
