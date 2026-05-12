@@ -307,7 +307,10 @@ export default function PhenotypingView() {
                 <Download size={14} />
                 Rapor İndir
               </button>
-              <button className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white text-xs font-bold uppercase tracking-widest rounded-xl hover:bg-slate-800 transition-colors">
+              <button 
+                onClick={() => window.dispatchEvent(new CustomEvent('change-view', { detail: 'upload' }))}
+                className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white text-xs font-bold uppercase tracking-widest rounded-xl hover:bg-slate-800 transition-colors"
+              >
                 <RefreshCw size={14} />
                 Yeni Görüntü İçin Sol Paneli Kullan
               </button>
