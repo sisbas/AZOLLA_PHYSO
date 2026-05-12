@@ -48,112 +48,140 @@ class AzollaPipeline:
         self.output_base = Path(self.config['output']['base_dir'])
 
     def setup_logging(self):
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-        )
+        # Use centralized logger instead of basicConfig
+        from backend.logger import get_logger
+        self.logger = get_logger("pipeline")
+        self.logger.info("Pipeline modules initialized")
 
     def run_single_frame(self, img_bgr: np.ndarray, timestamp: str, experiment_id: str) -> Dict[str, Any]:
         """Runs the 10-step logic on a single image frame with phenotyping."""
-        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-        out_dir = self.output_base / experiment_id / timestamp.replace(":", "-")
-        
-        all_errors = []
-        segmentation_outputs = {}
-
-        # 1. Standardization
-        std_res = self.std.process(img_rgb)
-        all_errors.extend(std_res.errors)
-        
-        # 2. & 3. Segmentation & Optimization (now returns extra outputs)
-        raw_mask, seg_qc, segmentation_outputs = self.seg.process(std_res.img_clean)
-        all_errors.extend(seg_qc.errors)
-        
-        opt_mask, opt_qc, opt_status = self.opt.process(raw_mask)
-        all_errors.extend(opt_qc.errors)
-        
-        # 4. Feature Extraction
-        feature_record = self.feat.process_frame(std_res.img_clean, opt_mask, timestamp)
-        all_errors.extend(feature_record.errors)
-        
-        # 5. Fenotipleme ve Biyokütle Tahmini (YENİ)
-        phenotype_metrics = self.pheno.process(img_rgb, opt_mask)
-        all_errors.extend(phenotype_metrics.errors)
-        
-        # 8 & 9. Frond Segmenter (with Fallback)
-        labels, frond_qc = self.frond.process(opt_mask)
-        all_errors.extend(frond_qc.get('errors', []))
-        
-        if not frond_qc.get('plausible', True):
-            labels, dl_qc, dl_status = self.dl.process(img_rgb, opt_mask)
-            all_errors.extend(dl_qc.get('errors', []))
-            opt_status = dl_status
+        try:
+            self.logger.info(f"Processing frame at {timestamp} for experiment {experiment_id}")
+            img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+            out_dir = self.output_base / experiment_id / timestamp.replace(":", "-")
             
-        # 6. Pseudocolor
-        overlay, heatmap, ps_metrics = self.pseudo.generate_heatmap(std_res.img_clean, opt_mask)
-        
-        # 7. Isolation
-        isolated = self.iso.isolate(img_rgb, opt_mask)
-        
-        # Compile results - merge segmentation outputs with metrics
-        results = {
-            "timestamp": timestamp,
-            "metrics": {
-                **{k: v for k, v in seg_qc.__dict__.items() if k != 'errors'},
-                **{k: v for k, v in opt_qc.__dict__.items() if k != 'errors'},
-                **{k: v for k, v in frond_qc.items() if k != 'errors'},
-                **ps_metrics,
-                **{k: v for k, v in feature_record.__dict__.items() if k != 'errors'}
-            },
-            "phenotyping": self.pheno.to_dict(phenotype_metrics),  # Fenotipleme sonuçları ekle
-            "segmentation": segmentation_outputs,  # Add detailed segmentation outputs
-            "status": opt_status,
-            "errors": all_errors,
-            "image_urls": {
-                "rgb": f"/media/{experiment_id}/{timestamp.replace(':', '-')}/rgb.png",
-                "pseudocolor": f"/media/{experiment_id}/{timestamp.replace(':', '-')}/heatmap.png",
-                "overlay": f"/media/{experiment_id}/{timestamp.replace(':', '-')}/overlay.png",
-                "isolated": f"/media/{experiment_id}/{timestamp.replace(':', '-')}/isolated.png"
+            all_errors = []
+            segmentation_outputs = {}
+
+            # 1. Standardization
+            self.logger.debug("Running standardization...")
+            std_res = self.std.process(img_rgb)
+            all_errors.extend(std_res.errors)
+            
+            # 2. & 3. Segmentation & Optimization (now returns extra outputs)
+            self.logger.debug("Running segmentation...")
+            raw_mask, seg_qc, segmentation_outputs = self.seg.process(std_res.img_clean)
+            all_errors.extend(seg_qc.errors)
+            
+            self.logger.debug("Running mask optimization...")
+            opt_mask, opt_qc, opt_status = self.opt.process(raw_mask)
+            all_errors.extend(opt_qc.errors)
+            
+            # 4. Feature Extraction
+            self.logger.debug("Extracting features...")
+            feature_record = self.feat.process_frame(std_res.img_clean, opt_mask, timestamp)
+            all_errors.extend(feature_record.errors)
+            
+            # 5. Fenotipleme ve Biyokütle Tahmini (YENİ)
+            self.logger.debug("Running phenotyping...")
+            phenotype_metrics = self.pheno.process(img_rgb, opt_mask)
+            all_errors.extend(phenotype_metrics.errors)
+            
+            # 8 & 9. Frond Segmenter (with Fallback)
+            self.logger.debug("Running frond segmentation...")
+            labels, frond_qc = self.frond.process(opt_mask)
+            all_errors.extend(frond_qc.get('errors', []))
+            
+            if not frond_qc.get('plausible', True):
+                self.logger.warning("Frond segmentation implausible, using DL fallback...")
+                labels, dl_qc, dl_status = self.dl.process(img_rgb, opt_mask)
+                all_errors.extend(dl_qc.get('errors', []))
+                opt_status = dl_status
+                
+            # 6. Pseudocolor
+            self.logger.debug("Generating pseudocolor heatmap...")
+            overlay, heatmap, ps_metrics = self.pseudo.generate_heatmap(std_res.img_clean, opt_mask)
+            
+            # 7. Isolation
+            self.logger.debug("Isolating biomass...")
+            isolated = self.iso.isolate(img_rgb, opt_mask)
+            
+            # Compile results - merge segmentation outputs with metrics
+            results = {
+                "timestamp": timestamp,
+                "metrics": {
+                    **{k: v for k, v in seg_qc.__dict__.items() if k != 'errors'},
+                    **{k: v for k, v in opt_qc.__dict__.items() if k != 'errors'},
+                    **{k: v for k, v in frond_qc.items() if k != 'errors'},
+                    **ps_metrics,
+                    **{k: v for k, v in feature_record.__dict__.items() if k != 'errors'}
+                },
+                "phenotyping": self.pheno.to_dict(phenotype_metrics),  # Fenotipleme sonuçları ekle
+                "segmentation": segmentation_outputs,  # Add detailed segmentation outputs
+                "status": opt_status,
+                "errors": all_errors,
+                "image_urls": {
+                    "rgb": f"/media/{experiment_id}/{timestamp.replace(':', '-')}/rgb.png",
+                    "pseudocolor": f"/media/{experiment_id}/{timestamp.replace(':', '-')}/heatmap.png",
+                    "overlay": f"/media/{experiment_id}/{timestamp.replace(':', '-')}/overlay.png",
+                    "isolated": f"/media/{experiment_id}/{timestamp.replace(':', '-')}/isolated.png"
+                }
             }
-        }
-        
-        # Export artifacts
-        self.iso.export_results(out_dir, {
-            "rgb": img_rgb,
-            "std_clean": std_res.img_clean,
-            "heatmap": heatmap,
-            "overlay": overlay,
-            "isolated": isolated,
-            "metrics": results["metrics"],
-            "phenotyping": results["phenotyping"]
-        })
-        
-        return results
+            
+            # Export artifacts
+            self.logger.debug(f"Exporting results to {out_dir}...")
+            self.iso.export_results(out_dir, {
+                "rgb": img_rgb,
+                "std_clean": std_res.img_clean,
+                "heatmap": heatmap,
+                "overlay": overlay,
+                "isolated": isolated,
+                "metrics": results["metrics"],
+                "phenotyping": results["phenotyping"]
+            })
+            
+            self.logger.info(f"Frame processing completed for {timestamp}")
+            return results
+            
+        except Exception as e:
+            self.logger.error(f"Error processing frame {timestamp}: {str(e)}", exc_info=True)
+            raise
 
     def run_series(self, frames: List[Tuple[np.ndarray, str]], experiment_id: str) -> Dict[str, Any]:
         """Runs the pipeline over a time-series and applies temporal decision engine."""
-        results_list = []
-        for img, ts in frames:
-            res = self.run_single_frame(img, ts, experiment_id)
-            results_list.append(res)
+        try:
+            self.logger.info(f"Starting series processing for experiment {experiment_id} with {len(frames)} frames")
+            results_list = []
+            for i, (img, ts) in enumerate(frames):
+                self.logger.debug(f"Processing frame {i+1}/{len(frames)} at {ts}")
+                res = self.run_single_frame(img, ts, experiment_id)
+                results_list.append(res)
+                
+            self.logger.info(f"Completed processing {len(frames)} frames, running decision engine...")
             
-        # Decision Phase
-        feature_data = [r['metrics'] for r in results_list]
-        feature_df = pd.DataFrame(feature_data)
-        
-        decision_df = self.dec.process(feature_df)
-        
-        # Final validation
-        val_report = self.val.run_cv(feature_df)
-        
-        for i, res in enumerate(results_list):
-            decision_data = decision_df.iloc[i].to_dict()
-            res['decision'] = {k: v for k, v in decision_data.items() if k != 'errors'}
-            res['errors'].extend(decision_data.get('errors', []))
+            # Decision Phase
+            feature_data = [r['metrics'] for r in results_list]
+            feature_df = pd.DataFrame(feature_data)
             
-        return {
-            "experiment_id": experiment_id,
-            "timeline": results_list,
-            "validation": val_report,
-            "metadata": self.val.generate_metadata(hash(str(self.config)))
-        }
+            decision_df = self.dec.process(feature_df)
+            
+            # Final validation
+            self.logger.debug("Running cross-validation...")
+            val_report = self.val.run_cv(feature_df)
+            
+            for i, res in enumerate(results_list):
+                decision_data = decision_df.iloc[i].to_dict()
+                res['decision'] = {k: v for k, v in decision_data.items() if k != 'errors'}
+                res['errors'].extend(decision_data.get('errors', []))
+            
+            self.logger.info(f"Series processing completed for experiment {experiment_id}")
+            
+            return {
+                "experiment_id": experiment_id,
+                "timeline": results_list,
+                "validation": val_report,
+                "metadata": self.val.generate_metadata(hash(str(self.config)))
+            }
+        except Exception as e:
+            self.logger.error(f"Error in series processing for {experiment_id}: {str(e)}", exc_info=True)
+            raise

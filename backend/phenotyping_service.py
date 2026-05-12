@@ -4,9 +4,14 @@ import base64
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Any, Dict, Tuple
+import logging
 
 import cv2
 import numpy as np
+
+from backend.logger import get_logger
+
+logger = get_logger("phenotyping")
 
 
 @dataclass
@@ -20,6 +25,7 @@ class PhenotypingConfig:
 class AzollaPhenotypingService:
     def __init__(self, config: PhenotypingConfig | None = None):
         self.config = config or PhenotypingConfig()
+        logger.info("Phenotyping service initialized")
 
     def _gamma_correction(self, image: np.ndarray) -> np.ndarray:
         inv_gamma = 1.0 / self.config.gamma
@@ -93,69 +99,79 @@ class AzollaPhenotypingService:
         return "data:image/png;base64," + base64.b64encode(enc.tobytes()).decode("utf-8")
 
     def analyze(self, image: np.ndarray, pool_area_m2: float = 16.0) -> Dict[str, Any]:
-        step1 = self._gamma_correction(image)
-        step2 = self._gray_world_white_balance(step1)
-        step3 = self._reduce_reflection(step2)
-        preprocessed = self._sharpen(step3)
-        mask = self._segment(preprocessed)
-        density_img, density_dist = self._density_map(mask)
+        try:
+            logger.info(f"Starting analysis for image with shape {image.shape}, pool_area: {pool_area_m2} m²")
+            
+            step1 = self._gamma_correction(image)
+            step2 = self._gray_world_white_balance(step1)
+            step3 = self._reduce_reflection(step2)
+            preprocessed = self._sharpen(step3)
+            mask = self._segment(preprocessed)
+            density_img, density_dist = self._density_map(mask)
 
-        total_pixels = mask.size
-        azolla_pixels = int(np.sum(mask > 0))
-        coverage = (azolla_pixels / total_pixels) * 100 if total_pixels else 0
-        area_m2 = pool_area_m2 * (coverage / 100.0)
+            total_pixels = mask.size
+            azolla_pixels = int(np.sum(mask > 0))
+            coverage = (azolla_pixels / total_pixels) * 100 if total_pixels else 0
+            area_m2 = pool_area_m2 * (coverage / 100.0)
 
-        rgb = cv2.cvtColor(preprocessed, cv2.COLOR_BGR2RGB).astype(np.float32)
-        r, g, b = rgb[:, :, 0], rgb[:, :, 1], rgb[:, :, 2]
-        agi = float(np.mean((2 * g - r - b) / (2 * g + r + b + 1e-6)))
-        saci = float(np.mean((g - b) / (g + b + 0.001)))
-        chl = float(np.mean(g / (r + 0.01)))
-        browning = float(np.mean((r > b) & (b > g)) * 100)
-        yellowing = float(np.mean((g < r) & (g < b)) * 100)
-        stress = browning + yellowing
+            rgb = cv2.cvtColor(preprocessed, cv2.COLOR_BGR2RGB).astype(np.float32)
+            r, g, b = rgb[:, :, 0], rgb[:, :, 1], rgb[:, :, 2]
+            agi = float(np.mean((2 * g - r - b) / (2 * g + r + b + 1e-6)))
+            saci = float(np.mean((g - b) / (g + b + 0.001)))
+            chl = float(np.mean(g / (r + 0.01)))
+            browning = float(np.mean((r > b) & (b > g)) * 100)
+            yellowing = float(np.mean((g < r) & (g < b)) * 100)
+            stress = browning + yellowing
 
-        fresh = self.config.alpha * coverage + self.config.beta
-        dry = fresh * self.config.dry_matter_ratio
-        chl_norm = np.clip(chl / 3.0, 0.0, 1.0)
-        protein = float(25 + 10 * chl_norm)
+            fresh = self.config.alpha * coverage + self.config.beta
+            dry = fresh * self.config.dry_matter_ratio
+            chl_norm = np.clip(chl / 3.0, 0.0, 1.0)
+            protein = float(25 + 10 * chl_norm)
 
-        return {
-            "timestamp": datetime.utcnow().isoformat(),
-            "segmentasyon": {
-                "azolla_area_pixels": azolla_pixels,
-                "azolla_area_m2": round(area_m2, 3),
-                "coverage_percent": round(coverage, 2),
-                "water_surface_percent": round(100 - coverage, 2),
-            },
-            "renk_indeksleri": {
-                "agi_index": round(agi, 4),
-                "saci_index": round(saci, 4),
-                "chlorophyll_index": round(chl, 4),
-            },
-            "stres_analizi": {
-                "browning_percent": round(browning, 2),
-                "yellowing_percent": round(yellowing, 2),
-                "stress_score": round(stress, 2),
-            },
-            "yogunluk_dagilimi": {f"{k}_percent": round(v, 2) for k, v in density_dist.items()},
-            "doku_analizi": {
-                "contrast": 0.0,
-                "homogeneity": 0.0,
-                "energy": 0.0,
-                "correlation": 0.0,
-            },
-            "biyokutle_tahmini": {
-                "fresh_biomass_g_m2": round(fresh, 2),
-                "dry_biomass_g_m2": round(dry, 2),
-                "protein_content_percent": round(protein, 2),
-            },
-            "buyume_parametreleri": {
-                "growth_rate_percent_day": None,
-                "doubling_time_days": None,
-                "max_coverage_percent": round(coverage, 2),
-            },
-            "images": {
-                "segmentasyon_maskesi": self._png_base64(mask),
-                "yogunluk_haritasi": self._png_base64(density_img),
-            },
-        }
+            result = {
+                "timestamp": datetime.utcnow().isoformat(),
+                "segmentasyon": {
+                    "azolla_area_pixels": azolla_pixels,
+                    "azolla_area_m2": round(area_m2, 3),
+                    "coverage_percent": round(coverage, 2),
+                    "water_surface_percent": round(100 - coverage, 2),
+                },
+                "renk_indeksleri": {
+                    "agi_index": round(agi, 4),
+                    "saci_index": round(saci, 4),
+                    "chlorophyll_index": round(chl, 4),
+                },
+                "stres_analizi": {
+                    "browning_percent": round(browning, 2),
+                    "yellowing_percent": round(yellowing, 2),
+                    "stress_score": round(stress, 2),
+                },
+                "yogunluk_dagilimi": {f"{k}_percent": round(v, 2) for k, v in density_dist.items()},
+                "doku_analizi": {
+                    "contrast": 0.0,
+                    "homogeneity": 0.0,
+                    "energy": 0.0,
+                    "correlation": 0.0,
+                },
+                "biyokutle_tahmini": {
+                    "fresh_biomass_g_m2": round(fresh, 2),
+                    "dry_biomass_g_m2": round(dry, 2),
+                    "protein_content_percent": round(protein, 2),
+                },
+                "buyume_parametreleri": {
+                    "growth_rate_percent_day": None,
+                    "doubling_time_days": None,
+                    "max_coverage_percent": round(coverage, 2),
+                },
+                "images": {
+                    "segmentasyon_maskesi": self._png_base64(mask),
+                    "yogunluk_haritasi": self._png_base64(density_img),
+                },
+            }
+            
+            logger.info("Phenotyping analysis completed successfully")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Phenotyping analysis failed: {str(e)}", exc_info=True)
+            raise
