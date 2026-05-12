@@ -136,6 +136,7 @@ export default function PhenotypingView() {
   const [poolArea, setPoolArea] = useState(String(DEFAULT_POOL_AREA_M2));
   const [segmentationMask, setSegmentationMask] = useState<string | null>(null);
   const [densityMap, setDensityMap] = useState<string | null>(null);
+  const [mode, setMode] = useState<'single' | 'batch'>('single');
 
   const handleAnalyze = async (file: File) => {
     const parsedPoolArea = Number(poolArea);
@@ -161,6 +162,21 @@ export default function PhenotypingView() {
       setDensityMap(result.images?.yogunluk_haritasi ?? null);
     } catch (err: any) {
       setError(err.message || 'Analiz sırasında hata oluştu');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleBatchUpload = async (files: FileList) => {
+    setError(null);
+    setLoading(true);
+    try {
+      // Batch modu için ilk görüntüyü analiz et (gelecekte genişletilebilir)
+      if (files.length > 0) {
+        await handleAnalyze(files[0]);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Batch analiz sırasında hata oluştu');
     } finally {
       setLoading(false);
     }
