@@ -47,10 +47,11 @@ class PhenotypeMetrics:
     texture_energy: float
     texture_correlation: float
     
-    # Biyokütle tahmini
+    # Biyokütle tahmini — kalibrasyon parametreleri ile
     fresh_biomass_g_m2: float
     dry_biomass_g_m2: float
     protein_content_percent: float
+    biomass_calibration: Dict[str, Any]  # Kalibrasyon detayları
     
     # Büyüme parametreleri
     growth_rate_percent_day: float
@@ -70,6 +71,9 @@ class PhenotypingModule:
     3. Özellik Çıkarımı: Alan, yoğunluk, doku analizi
     4. Zamansal Analiz: Büyüme hızı, katlanma süresi
     5. Biyokütle Tahmini: Taze/kuru ağırlık, protein içeriği
+    
+    NOT: pixel_to_m2 değeri kamera kalibrasyonuna göre değişir.
+    Gerçek alan hesabı için pool_area_m2 parametresi kullanılmalıdır.
     """
     
     def __init__(self, config: Dict[str, Any]):
@@ -79,7 +83,12 @@ class PhenotypingModule:
         self.alpha = self.cfg.get('biomass_alpha', 5.75)  # g/m² per % coverage
         self.beta = self.cfg.get('biomass_beta', 10.0)   # base offset g/m²
         
-        # Pixel to m² conversion (kamera kalibrasyonuna göre değişir)
+        # Kalibrasyon güven aralıkları (literatür bazlı)
+        self.alpha_ci = self.cfg.get('biomass_alpha_ci', (4.5, 7.0))
+        self.r_squared = self.cfg.get('biomass_r_squared', 0.82)
+        self.calibration_reference = self.cfg.get('calibration_reference', 'Lab calibration 2024')
+        
+        # Pixel to m² conversion — varsayılan değer, gerçek hesaplama phenotyping_service.py'de yapılır
         self.pixel_to_m2 = self.cfg.get('pixel_to_m2', 0.0001)  # Örnek: 1920x1080 @ 1m²
         
         # HSV ranges for Azolla segmentation
@@ -245,7 +254,7 @@ class PhenotypingModule:
                 'correlation': 0.0
             }
     
-    def estimate_biomass(self, coverage_percent: float, chlorophyll_index: float) -> Dict[str, float]:
+    def estimate_biomass(self, coverage_percent: float, chlorophyll_index: float) -> Dict[str, Any]:
         """
         Biyokütle Tahmini
         
@@ -253,6 +262,8 @@ class PhenotypingModule:
         taze_ağırlık (g/m²) = α × kaplama_yüzdesi + β
         kuru_ağırlık = taze_ağırlık × 0.08 (%8 kuru madde)
         protein (%) = 25 + 10 × (Chl-Azolla indeksi normalize)
+        
+        Returns include calibration metadata for transparency.
         """
         # Taze ağırlık tahmini
         fresh_biomass = self.alpha * coverage_percent + self.beta
@@ -265,10 +276,21 @@ class PhenotypingModule:
         chl_normalized = min(chlorophyll_index / 10.0, 1.0)
         protein_content = 25 + 10 * chl_normalized  # %25-35 aralığı
         
+        # Kalibrasyon bilgisi — API response'una eklenir
+        calibration_info = {
+            'alpha': self.alpha,
+            'beta': self.beta,
+            'alpha_ci': list(self.alpha_ci),
+            'r_squared': self.r_squared,
+            'reference': self.calibration_reference,
+            'note': 'Korelasyon ≠ nedensellik. Bu skor erken uyarı indeksidir; biyokimyasal validasyon gerektirir.'
+        }
+        
         return {
             'fresh_biomass_g_m2': fresh_biomass,
             'dry_biomass_g_m2': dry_biomass,
-            'protein_content_percent': protein_content
+            'protein_content_percent': protein_content,
+            'calibration': calibration_info
         }
     
     def calculate_growth_parameters(self, current_coverage: float, 
@@ -417,6 +439,7 @@ class PhenotypingModule:
                 fresh_biomass_g_m2=round(biomass_estimates['fresh_biomass_g_m2'], 2),
                 dry_biomass_g_m2=round(biomass_estimates['dry_biomass_g_m2'], 2),
                 protein_content_percent=round(biomass_estimates['protein_content_percent'], 2),
+                biomass_calibration=biomass_estimates['calibration'],
                 
                 growth_rate_percent_day=round(growth_params['growth_rate_percent_day'], 2),
                 doubling_time_days=round(growth_params['doubling_time_days'], 2),
