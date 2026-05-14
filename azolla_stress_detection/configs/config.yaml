@@ -1,0 +1,124 @@
+# Azolla Early Stress Detection Configuration
+
+# Paths
+paths:
+  base_dir: "."
+  images_dir: "data/images"
+  excel_dir: "data/excel"
+  processed_dir: "data/processed"
+  models_dir: "models"
+  output_dir: "data/processed/outputs"
+
+# Image Processing Parameters
+image_processing:
+  target_width: 640
+  target_height: 480
+  color_space: "RGB"  # RGB or BGR
+  
+# Segmentation Parameters
+segmentation:
+  method: "adaptive_threshold"  # adaptive_threshold, otsu, unet
+  adaptive_block_size: 11
+  adaptive_c: 2
+  morph_kernel_size: 5
+  min_area_ratio: 0.01  # Minimum area ratio to keep ROI
+  max_area_ratio: 0.95  # Maximum area ratio to keep ROI
+  
+# Feature Extraction
+features:
+  color_indices:
+    - ExG   # Excess Green Index
+    - VARI  # Visible Atmospherically Resistant Index
+    - GLI   # Green Leaf Index
+    - ExR   # Excess Red Index
+    - YI    # Yellowness Index
+    - GMI   # Green-Magenta Index
+    - BYR   # Blue-Yellow Ratio
+  color_spaces:
+    - LAB
+    - HSV
+  texture_features:
+    - contrast
+    - homogeneity
+    - energy
+    - correlation
+  glcm_distances: [1, 2, 4]
+  glcm_angles: [0, 45, 90, 135]
+  
+# Model Configuration
+model:
+  type: "xgboost"  # random_forest, xgboost
+  classification:
+    enabled: true
+    n_classes: 3  # Early, Moderate, Severe
+    thresholds:
+      early: 0.33
+      moderate: 0.66
+  regression:
+    enabled: true
+    targets:
+      - rgr_deviation
+      - chlorophyll_loss
+  hyperparameters:
+    n_estimators: 200
+    max_depth: 6
+    learning_rate: 0.1
+    min_child_weight: 1
+    subsample: 0.8
+    colsample_bytree: 0.8
+    random_state: 42
+    
+# Time-Series Analysis
+time_series:
+  enabled: true
+  smoothing_method: "ewma"  # ewma, rolling_mean
+  ewma_span: 3
+  deviation_threshold: 2.0  # Standard deviations from control baseline
+  early_warning_days: 2  # Days before visible symptoms
+  
+# Calibration with Excel Data
+calibration:
+  enabled: true
+  method: "isotonic"  # isotonic, platt
+  features_mapping:
+    chlorophyll_ab:
+      - ExG
+      - VARI
+      - GMI
+    carotenoids:
+      - ExR
+      - YI
+      - BYR
+    growth:
+      - area
+      - perimeter
+      - delta_greenness
+      
+# Treatment Groups
+treatments:
+  control: "K"
+  groups:
+    - "K"
+    - "Gd"
+    - "Gd+BR10^-7"
+    - "Gd+BR10^-8"
+    - "Gd+BR10^-9"
+    - "BR10^-7"
+    - "BR10^-8"
+    - "BR10^-9"
+    
+# Dashboard Settings
+dashboard:
+  title: "Azolla Early Stress Detection"
+  theme: "light"
+  show_segmentation_preview: true
+  default_time_window: 7  # days
+  
+# Logging
+logging:
+  level: "INFO"
+  file: "logs/azolla_stress.log"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  
+# Reproducibility
+random_seed: 42
