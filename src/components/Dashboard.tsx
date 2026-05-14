@@ -8,6 +8,76 @@ interface DashboardProps {
   taskId: string;
 }
 
+type PhenotypingMetricKey =
+  | 'coverage_percent'
+  | 'water_surface_percent'
+  | 'agi_index'
+  | 'saci_index'
+  | 'chlorophyll_index'
+  | 'stress_browning_percent'
+  | 'stress_yellowing_percent'
+  | 'fresh_biomass_g_m2'
+  | 'dry_biomass_g_m2'
+  | 'protein_content_percent';
+
+const PHENOTYPING_METRICS: Array<{ key: PhenotypingMetricKey; label: string; unit: string; digits: number; color: string }> = [
+  { key: 'coverage_percent', label: 'Kapsama', unit: '%', digits: 1, color: 'emerald' },
+  { key: 'water_surface_percent', label: 'Su Yüzeyi', unit: '%', digits: 1, color: 'cyan' },
+  { key: 'agi_index', label: 'AGI İndeksi', unit: '', digits: 3, color: 'lime' },
+  { key: 'saci_index', label: 'SACI İndeksi', unit: '', digits: 3, color: 'blue' },
+  { key: 'chlorophyll_index', label: 'Klorofil İndeksi', unit: '', digits: 3, color: 'green' },
+  { key: 'stress_browning_percent', label: 'Kahverengileşme', unit: '%', digits: 1, color: 'amber' },
+  { key: 'stress_yellowing_percent', label: 'Sararma', unit: '%', digits: 1, color: 'yellow' },
+  { key: 'fresh_biomass_g_m2', label: 'Taze Biyokütle', unit: 'g/m²', digits: 1, color: 'teal' },
+  { key: 'dry_biomass_g_m2', label: 'Kuru Biyokütle', unit: 'g/m²', digits: 1, color: 'slate' },
+  { key: 'protein_content_percent', label: 'Protein İçeriği', unit: '%', digits: 1, color: 'violet' },
+];
+
+const getPhenotypingValue = (phenotyping: any, key: PhenotypingMetricKey): number | null => {
+  if (!phenotyping) return null;
+
+  const nestedPaths: Record<PhenotypingMetricKey, string[]> = {
+    coverage_percent: ['segmentasyon', 'coverage_percent'],
+    water_surface_percent: ['segmentasyon', 'water_surface_percent'],
+    agi_index: ['renk_indeksleri', 'agi_index'],
+    saci_index: ['renk_indeksleri', 'saci_index'],
+    chlorophyll_index: ['renk_indeksleri', 'chlorophyll_index'],
+    stress_browning_percent: ['stres_analizi', 'browning_percent'],
+    stress_yellowing_percent: ['stres_analizi', 'yellowing_percent'],
+    fresh_biomass_g_m2: ['biyokutle_tahmini', 'fresh_biomass_g_m2'],
+    dry_biomass_g_m2: ['biyokutle_tahmini', 'dry_biomass_g_m2'],
+    protein_content_percent: ['biyokutle_tahmini', 'protein_content_percent'],
+  };
+
+  const directValue = phenotyping[key];
+  if (typeof directValue === 'number' && Number.isFinite(directValue)) return directValue;
+
+  const nestedValue = nestedPaths[key].reduce((acc, pathKey) => acc?.[pathKey], phenotyping);
+  return typeof nestedValue === 'number' && Number.isFinite(nestedValue) ? nestedValue : null;
+};
+
+const formatPhenotypingValue = (value: number | null, unit = '', digits = 1) => {
+  if (value === null) return 'Veri yok';
+  const formatted = value.toFixed(digits);
+  return unit ? `${formatted}${unit}` : formatted;
+};
+
+const normalizePercent = (value: number | null) => value === null ? null : Math.max(0, Math.min(value / 100, 1));
+const normalizeChlorophyll = (value: number | null) => value === null ? null : Math.max(0, Math.min(value / 10, 1));
+
+const PHENOTYPING_CARD_STYLES: Record<string, string> = {
+  emerald: 'bg-emerald-50 text-emerald-700 border-emerald-100',
+  cyan: 'bg-cyan-50 text-cyan-700 border-cyan-100',
+  lime: 'bg-lime-50 text-lime-700 border-lime-100',
+  blue: 'bg-blue-50 text-blue-700 border-blue-100',
+  green: 'bg-green-50 text-green-700 border-green-100',
+  amber: 'bg-amber-50 text-amber-700 border-amber-100',
+  yellow: 'bg-yellow-50 text-yellow-700 border-yellow-100',
+  teal: 'bg-teal-50 text-teal-700 border-teal-100',
+  slate: 'bg-slate-50 text-slate-700 border-slate-100',
+  violet: 'bg-violet-50 text-violet-700 border-violet-100',
+};
+
 export default function Dashboard({ taskId }: DashboardProps) {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -190,13 +260,33 @@ export default function Dashboard({ taskId }: DashboardProps) {
     document.body.removeChild(link);
   };
 
-  const chartData = data.timeline.map((frame: any, idx: number) => ({
-    time: idx,
-    score: frame.metrics.mean_stress_score,
-    prob: frame.metrics.early_stress_prob,
-    coverage: frame.metrics.coverage_pct,
-    fronds: frame.metrics.frond_count
-  }));
+  const biomassSeries = data.timeline
+    .map((frame: any) => getPhenotypingValue(frame.phenotyping, 'fresh_biomass_g_m2'))
+    .filter((value: number | null): value is number => value !== null);
+  const maxFreshBiomass = Math.max(...biomassSeries, 1);
+
+  const chartData = data.timeline.map((frame: any, idx: number) => {
+    const phenotyping = frame.phenotyping;
+    const phenoCoverageRaw = getPhenotypingValue(phenotyping, 'coverage_percent');
+    const phenoChlorophyllRaw = getPhenotypingValue(phenotyping, 'chlorophyll_index');
+    const phenoBiomassRaw = getPhenotypingValue(phenotyping, 'fresh_biomass_g_m2');
+
+    return {
+      time: idx,
+      score: frame.metrics.mean_stress_score,
+      prob: frame.metrics.early_stress_prob,
+      coverage: frame.metrics.coverage_pct,
+      fronds: frame.metrics.frond_count,
+      phenoCoverage: normalizePercent(phenoCoverageRaw),
+      phenoChlorophyll: normalizeChlorophyll(phenoChlorophyllRaw),
+      phenoBiomass: phenoBiomassRaw === null ? null : Math.max(0, Math.min(phenoBiomassRaw / maxFreshBiomass, 1)),
+      phenoCoverageRaw,
+      phenoChlorophyllRaw,
+      phenoBiomassRaw
+    };
+  });
+
+  const currentPhenotyping = currentFrame.phenotyping;
 
   // Statistics calculation
   const totalFrames = data.timeline.length;
@@ -586,6 +676,41 @@ export default function Dashboard({ taskId }: DashboardProps) {
                 </div>
               </div>
 
+              {/* Phenotyping Metrics */}
+              <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xl shadow-slate-200/30">
+                <div className="flex items-center justify-between gap-4 mb-6">
+                  <div>
+                    <h3 className="text-[11px] font-bold text-slate-900 uppercase tracking-[0.2em] mb-1">Fenotipleme</h3>
+                    <p className="text-[10px] text-slate-400">currentFrame.phenotyping çıktısından alan, indeks, stres ve biyokütle metrikleri</p>
+                  </div>
+                  <div className="px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100 text-[9px] font-black uppercase tracking-widest">
+                    RGB Phenotyping
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                  {PHENOTYPING_METRICS.map((metric) => {
+                    const value = getPhenotypingValue(currentPhenotyping, metric.key);
+                    return (
+                      <div
+                        key={metric.key}
+                        className={cn(
+                          "rounded-xl border p-3 min-h-[92px] flex flex-col justify-between",
+                          PHENOTYPING_CARD_STYLES[metric.color] || PHENOTYPING_CARD_STYLES.slate
+                        )}
+                      >
+                        <span className="text-[8px] font-black uppercase tracking-widest opacity-70">{metric.label}</span>
+                        <span className={cn(
+                          "font-mono font-black tracking-tight",
+                          value === null ? "text-sm" : "text-xl"
+                        )}>
+                          {formatPhenotypingValue(value, metric.unit, metric.digits)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
               {/* Bottom Row: Large Chart */}
               <div className="bg-white border border-slate-200 rounded-2xl p-8 shadow-xl shadow-slate-200/30">
                  <div className="flex items-center justify-between mb-10">
@@ -593,12 +718,21 @@ export default function Dashboard({ taskId }: DashboardProps) {
                       <h3 className="text-[11px] font-bold text-slate-900 uppercase tracking-[0.2em] mb-1">Temporal Stress Kinematics</h3>
                       <p className="text-[10px] text-slate-400">Zamana bağlı fizyolojik stres eğilimi ve varyans analizi</p>
                     </div>
-                    <div className="flex gap-8 text-[9px] font-bold text-slate-500 uppercase tracking-widest">
+                    <div className="flex flex-wrap justify-end gap-x-6 gap-y-2 text-[9px] font-bold text-slate-500 uppercase tracking-widest">
                        <div className="flex items-center gap-2">
                           <div className="w-3 h-1 bg-slate-900 rounded-full" /> Probability
                        </div>
                        <div className="flex items-center gap-2">
                           <div className="w-3 h-1 bg-rose-500 rounded-full" /> Intensity
+                       </div>
+                       <div className="flex items-center gap-2">
+                          <div className="w-3 h-1 bg-emerald-500 rounded-full" /> Kapsama
+                       </div>
+                       <div className="flex items-center gap-2">
+                          <div className="w-3 h-1 bg-lime-500 rounded-full" /> Klorofil
+                       </div>
+                       <div className="flex items-center gap-2">
+                          <div className="w-3 h-1 bg-violet-500 rounded-full" /> Biyokütle
                        </div>
                     </div>
                  </div>
@@ -618,17 +752,34 @@ export default function Dashboard({ taskId }: DashboardProps) {
                           cursor={{ stroke: '#e2e8f0', strokeWidth: 2 }}
                           content={({ active, payload }) => {
                             if (active && payload && payload.length) {
+                              const row = payload[0]?.payload || {};
+                              const findValue = (key: string) => payload.find((item: any) => item.dataKey === key)?.value as number | null | undefined;
+                              const scoreValue = findValue('score');
+                              const probValue = findValue('prob');
+
                               return (
-                                <div className="bg-slate-900 text-white p-4 rounded-xl shadow-2xl border border-white/10 min-w-[120px]">
+                                <div className="bg-slate-900 text-white p-4 rounded-xl shadow-2xl border border-white/10 min-w-[180px]">
                                   <p className="text-[8px] font-bold uppercase tracking-widest opacity-40 mb-3">Temporal Node</p>
                                   <div className="space-y-2">
                                     <div className="flex justify-between items-center gap-4">
                                       <span className="text-[9px] font-bold text-rose-400 uppercase">Intensity</span>
-                                      <span className="text-xs font-mono font-bold">{(payload[0]?.value as number).toFixed(3)}</span>
+                                      <span className="text-xs font-mono font-bold">{typeof scoreValue === 'number' ? scoreValue.toFixed(3) : 'Veri yok'}</span>
                                     </div>
                                     <div className="flex justify-between items-center gap-4">
                                       <span className="text-[9px] font-bold text-white uppercase">Prob</span>
-                                      <span className="text-xs font-mono font-bold">{(payload[1]?.value as number).toFixed(3)}</span>
+                                      <span className="text-xs font-mono font-bold">{typeof probValue === 'number' ? probValue.toFixed(3) : 'Veri yok'}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center gap-4">
+                                      <span className="text-[9px] font-bold text-emerald-300 uppercase">Kapsama</span>
+                                      <span className="text-xs font-mono font-bold">{formatPhenotypingValue(row.phenoCoverageRaw ?? null, '%', 1)}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center gap-4">
+                                      <span className="text-[9px] font-bold text-lime-300 uppercase">Klorofil</span>
+                                      <span className="text-xs font-mono font-bold">{formatPhenotypingValue(row.phenoChlorophyllRaw ?? null, '', 3)}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center gap-4">
+                                      <span className="text-[9px] font-bold text-violet-300 uppercase">Biyokütle</span>
+                                      <span className="text-xs font-mono font-bold">{formatPhenotypingValue(row.phenoBiomassRaw ?? null, 'g/m²', 1)}</span>
                                     </div>
                                   </div>
                                 </div>
@@ -637,8 +788,11 @@ export default function Dashboard({ taskId }: DashboardProps) {
                             return null;
                           }}
                         />
-                        <Line type="monotone" dataKey="score" stroke="#ef4444" strokeWidth={4} dot={{ r: 0 }} activeDot={{ r: 6, strokeWidth: 0 }} animationDuration={1500} />
-                        <Line type="monotone" dataKey="prob" stroke="#0f172a" strokeWidth={2} strokeDasharray="3 6" dot={{ r: 0 }} activeDot={{ r: 4 }} animationDuration={1000} />
+                        <Line type="monotone" dataKey="score" stroke="#ef4444" strokeWidth={4} dot={{ r: 0 }} activeDot={{ r: 6, strokeWidth: 0 }} animationDuration={1500} connectNulls />
+                        <Line type="monotone" dataKey="prob" stroke="#0f172a" strokeWidth={2} strokeDasharray="3 6" dot={{ r: 0 }} activeDot={{ r: 4 }} animationDuration={1000} connectNulls />
+                        <Line type="monotone" dataKey="phenoCoverage" stroke="#10b981" strokeWidth={2} strokeDasharray="6 4" dot={{ r: 0 }} activeDot={{ r: 4 }} animationDuration={1100} connectNulls />
+                        <Line type="monotone" dataKey="phenoChlorophyll" stroke="#84cc16" strokeWidth={2} strokeDasharray="2 4" dot={{ r: 0 }} activeDot={{ r: 4 }} animationDuration={1200} connectNulls />
+                        <Line type="monotone" dataKey="phenoBiomass" stroke="#8b5cf6" strokeWidth={2} strokeDasharray="10 4" dot={{ r: 0 }} activeDot={{ r: 4 }} animationDuration={1300} connectNulls />
                         <ReferenceLine x={currentIndex} stroke="#0f172a" strokeWidth={1} isFront />
                       </LineChart>
                     </ResponsiveContainer>
