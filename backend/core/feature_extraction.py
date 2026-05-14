@@ -5,6 +5,7 @@ import logging
 from typing import Dict, Any, List
 from dataclasses import dataclass
 from skimage.feature import graycomatrix, graycoprops
+from skimage.exposure import rescale_intensity
 
 from .errors import format_error
 
@@ -74,8 +75,43 @@ class FeatureExtractionModule:
             g_skew = float(pd.Series(g_valid).skew()) if len(g_valid) > 0 else 0.0
             g_kurt = float(pd.Series(g_valid).kurt()) if len(g_valid) > 0 else 0.0
             
-            entropy = 0.5 + 0.1 * g_skew if len(g_valid) > 100 else 0.0
+            # 3. GLCM texture features — using actual GLCM matrix instead of fake constant
+            entropy = 0.0
             contrast = 0.0
+            if len(g_valid) > 100:
+                try:
+                    # Rescale green channel to 0-255 uint8 for GLCM
+                    g_uint8 = (rescale_intensity(g_valid.reshape(-1,1), out_range=(0,255))
+                               .astype(np.uint8).reshape(img_masked.shape[:2]))
+                    
+                    # Create mask for GLCM calculation
+                    mask_bool = mask > 0 if mask.max() > 1 else mask.astype(bool)
+                    
+                    # Quantize to 64 levels for efficiency
+                    g_quantized = (g_uint8[mask_bool] // 4).astype(np.uint8)
+                    
+                    # Calculate GLCM on masked region
+                    if len(g_quantized) > 100:
+                        glcm = graycomatrix(
+                            g_quantized.reshape(-1, 1), 
+                            distances=[1, 3],
+                            angles=[0, np.pi/4], 
+                            levels=64, 
+                            symmetric=True, 
+                            normed=True
+                        )
+                        
+                        # Entropy: -sum(p * log2(p))
+                        glcm_flat = glcm.flatten()
+                        glcm_nonzero = glcm_flat[glcm_flat > 0]
+                        entropy = float(-np.sum(glcm_nonzero * np.log2(glcm_nonzero + 1e-10)))
+                        
+                        # Contrast from GLCM properties
+                        contrast = float(graycoprops(glcm, 'contrast').mean())
+                except Exception as e:
+                    logging.warning(f"GLCM calculation failed: {str(e)}, using fallback")
+                    entropy = 0.5 + 0.1 * g_skew
+                    contrast = 0.0
             
             # Calculate coverage percentage correctly (mask is now 0-255 uint8)
             mask_bool = mask > 0 if mask.max() > 1 else mask.astype(bool)

@@ -33,7 +33,8 @@ class DecisionModule:
         prob = (
             features.get('rg_ratio', 0) * self.weights['rg_ratio_pct'] +
             (1 - features.get('mean_g', 0)) * self.weights['mean_g_pct'] +
-            features.get('glcm_entropy', 0) * self.weights['glcm_entropy_pct']
+            features.get('glcm_entropy', 0) * self.weights['glcm_entropy_pct'] +
+            features.get('coverage_pct', 0) / 100.0 * self.weights['coverage_pct']
         )
         return float(np.clip(prob, 0, 1))
 
