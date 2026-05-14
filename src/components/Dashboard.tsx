@@ -262,6 +262,31 @@ const STRESS_RISK_STYLES: Record<StressRiskLevel, { label: string; card: string;
   },
 };
 
+type CompareMetricKey =
+  | 'coverage_pct'
+  | 'early_stress_prob'
+  | 'frond_count'
+  | 'rg_ratio'
+  | 'chlorophyll_index'
+  | 'fresh_biomass_g_m2';
+
+interface CompareMetricConfig {
+  key: CompareMetricKey;
+  label: string;
+  unit: string;
+  digits: number;
+  percentValue?: boolean;
+}
+
+const COMPARE_METRICS: CompareMetricConfig[] = [
+  { key: 'coverage_pct', label: 'Kapsama', unit: '%', digits: 1 },
+  { key: 'early_stress_prob', label: 'Erken Stres Olasılığı', unit: '%', digits: 1, percentValue: true },
+  { key: 'frond_count', label: 'Frond Sayısı', unit: '', digits: 0 },
+  { key: 'rg_ratio', label: 'R/G Oranı', unit: '', digits: 3 },
+  { key: 'chlorophyll_index', label: 'Klorofil İndeksi', unit: '', digits: 3 },
+  { key: 'fresh_biomass_g_m2', label: 'Taze Biyokütle', unit: 'g/m²', digits: 1 },
+];
+
 const getNumericValue = (value: unknown): number | null => {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string' && value.trim() !== '') {
@@ -316,11 +341,43 @@ const formatStressMetricValue = (value: number | null, config: StressMetricConfi
   return config.unit ? `${formatted}${config.unit}` : formatted;
 };
 
+const getCompareMetricValue = (frame: any, key: CompareMetricKey): number | null => {
+  if (!frame) return null;
+
+  if (key === 'chlorophyll_index' || key === 'fresh_biomass_g_m2') {
+    return getPhenotypingValue(frame.phenotyping, key as PhenotypingMetricKey);
+  }
+
+  return getNumericValue(frame.metrics?.[key]);
+};
+
+const getCompareImageUrl = (frame: any) => (
+  frame?.image_urls?.isolated
+  ?? frame?.image_urls?.overlay
+  ?? frame?.image_urls?.pseudocolor
+  ?? frame?.image_urls?.rgb
+  ?? ''
+);
+
+const formatCompareValue = (value: number | null, metric: CompareMetricConfig, options?: { signed?: boolean; delta?: boolean }) => {
+  if (value === null) return 'Veri yok';
+  const displayValue = metric.percentValue ? value * 100 : value;
+  const prefix = options?.signed && displayValue > 0 ? '+' : '';
+  return `${prefix}${displayValue.toFixed(metric.digits)}${metric.unit}`;
+};
+
+const formatPercentChange = (value: number | null) => {
+  if (value === null) return 'Başlangıç 0';
+  return `${value > 0 ? '+' : ''}${value.toFixed(1)}%`;
+};
+
 export default function Dashboard({ taskId }: DashboardProps) {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [compareStartIndex, setCompareStartIndex] = useState(0);
+  const [compareEndIndex, setCompareEndIndex] = useState(1);
   const [viewMode, setViewMode] = useState<'rgb' | 'pseudo' | 'overlay' | 'isolated'>('isolated');
   const [activeTab, setActiveTab] = useState<'analysis' | 'stats' | 'insights'>('analysis');
   const [interpretation, setInterpretation] = useState<string>('');
@@ -372,6 +429,14 @@ export default function Dashboard({ taskId }: DashboardProps) {
     };
     if (taskId) fetchResults();
   }, [taskId]);
+
+  useEffect(() => {
+    const frameCount = data?.timeline?.length ?? 0;
+    if (frameCount === 0) return;
+
+    setCompareStartIndex((index) => Math.min(index, frameCount - 1));
+    setCompareEndIndex((index) => Math.min(Math.max(index, frameCount > 1 ? 1 : 0), frameCount - 1));
+  }, [data]);
 
   const generateAIInterpretation = async (stats: any) => {
     if (interpretation || isInterpreting) return;
@@ -521,6 +586,25 @@ export default function Dashboard({ taskId }: DashboardProps) {
       phenoCoverageRaw,
       phenoChlorophyllRaw,
       phenoBiomassRaw
+    };
+  });
+
+  const compareStartFrame = data.timeline[compareStartIndex] || data.timeline[0];
+  const compareEndFrame = data.timeline[compareEndIndex] || data.timeline[Math.min(1, data.timeline.length - 1)] || data.timeline[0];
+  const compareRows = COMPARE_METRICS.map((metric) => {
+    const startValue = getCompareMetricValue(compareStartFrame, metric.key);
+    const endValue = getCompareMetricValue(compareEndFrame, metric.key);
+    const hasData = startValue !== null && endValue !== null;
+    const delta = hasData ? endValue - startValue : null;
+    const percentChange = hasData && Math.abs(startValue) > Number.EPSILON ? (delta / Math.abs(startValue)) * 100 : null;
+
+    return {
+      ...metric,
+      startValue,
+      endValue,
+      hasData,
+      delta,
+      percentChange,
     };
   });
 
@@ -924,6 +1008,129 @@ export default function Dashboard({ taskId }: DashboardProps) {
                      <button className="w-full bg-[#10b981] hover:bg-emerald-600 text-white text-[10px] font-bold uppercase py-4 rounded-xl flex items-center justify-center gap-3 transition-all relative z-10 shadow-lg shadow-emerald-900/40">
                        <Layers size={14} /> Full_Batch_Report (CSV)
                      </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Frame Comparison Panel */}
+              <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xl shadow-slate-200/30">
+                <div className="flex flex-col gap-5">
+                  <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+                    <div>
+                      <h3 className="text-[11px] font-bold text-slate-900 uppercase tracking-[0.2em] mb-1">Frame Karşılaştırma</h3>
+                      <p className="text-[10px] text-slate-400">İki seçili kare arasında mutlak fark ve yüzde değişim analizi</p>
+                    </div>
+                    <div className="flex items-center gap-2 text-[9px] font-black uppercase tracking-widest text-slate-500">
+                      <span className="px-3 py-1.5 rounded-full bg-slate-100 border border-slate-200">Başlangıç: {`FRAME_${String(compareStartIndex + 1).padStart(2, '0')}`}</span>
+                      <span className="text-slate-300">→</span>
+                      <span className="px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">Bitiş: {`FRAME_${String(compareEndIndex + 1).padStart(2, '0')}`}</span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                    <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4 space-y-4">
+                      <div className="flex items-center gap-2">
+                        <Filter size={14} className="text-slate-500" />
+                        <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-600">Timeline Selector</h4>
+                      </div>
+                      {[
+                        { label: 'Başlangıç Frame', value: compareStartIndex, setter: setCompareStartIndex, color: 'accent-slate-900' },
+                        { label: 'Bitiş Frame', value: compareEndIndex, setter: setCompareEndIndex, color: 'accent-emerald-600' },
+                      ].map((selector) => (
+                        <div key={selector.label} className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">{selector.label}</span>
+                            <span className="text-[10px] font-mono font-black text-slate-900">{`FRAME_${String(selector.value + 1).padStart(2, '0')}`}</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0"
+                            max={data.timeline.length - 1}
+                            value={selector.value}
+                            onChange={(e) => selector.setter(parseInt(e.target.value))}
+                            className={cn("w-full h-1 bg-white rounded-full appearance-none cursor-pointer", selector.color)}
+                          />
+                          <div className="flex justify-between">
+                            {data.timeline.map((_: any, i: number) => (
+                              <button
+                                key={`${selector.label}-${i}`}
+                                onClick={() => selector.setter(i)}
+                                className={cn(
+                                  "w-1.5 h-1.5 rounded-full transition-all",
+                                  i === selector.value ? "bg-slate-950 scale-125" : "bg-slate-300 hover:bg-slate-500"
+                                )}
+                                aria-label={`${selector.label} ${i + 1}`}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      {[
+                        { label: 'Başlangıç', frame: compareStartFrame, index: compareStartIndex },
+                        { label: 'Bitiş', frame: compareEndFrame, index: compareEndIndex },
+                      ].map((item) => (
+                        <div key={item.label} className="rounded-2xl bg-slate-950 border border-slate-800 overflow-hidden min-h-[190px] flex flex-col">
+                          <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+                            <span className="text-[9px] font-black text-white/50 uppercase tracking-widest">{item.label}</span>
+                            <span className="text-[10px] font-mono font-black text-white">{`FRAME_${String(item.index + 1).padStart(2, '0')}`}</span>
+                          </div>
+                          <div className="flex-1 relative flex items-center justify-center p-3">
+                            {getCompareImageUrl(item.frame) ? (
+                              <img
+                                src={getCompareImageUrl(item.frame)}
+                                alt={`${item.label} karşılaştırma çıktısı`}
+                                className="max-h-44 max-w-full object-contain rounded-lg drop-shadow-[0_0_18px_rgba(16,185,129,0.22)]"
+                              />
+                            ) : (
+                              <div className="text-[10px] font-bold uppercase tracking-widest text-white/40">Görsel yok</div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                    {compareRows.map((metric) => (
+                      <div
+                        key={metric.key}
+                        className={cn(
+                          "rounded-xl border p-4 min-h-[132px] flex flex-col justify-between transition-all",
+                          metric.hasData ? "bg-white border-slate-200 shadow-sm" : "bg-slate-50 border-slate-100 opacity-55 grayscale"
+                        )}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <span className="text-[8px] font-black uppercase tracking-widest text-slate-400">{metric.label}</span>
+                            <div className="mt-2 flex items-center gap-2 text-[10px] font-mono font-bold text-slate-500">
+                              <span>{formatCompareValue(metric.startValue, metric)}</span>
+                              <span>→</span>
+                              <span>{formatCompareValue(metric.endValue, metric)}</span>
+                            </div>
+                          </div>
+                          {!metric.hasData && (
+                            <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-slate-400">Pasif</span>
+                          )}
+                        </div>
+                        <div className="flex items-end justify-between gap-4 mt-4">
+                          <div>
+                            <span className="block text-[8px] font-black uppercase tracking-widest text-slate-400">Mutlak Δ</span>
+                            <span className={cn("font-mono text-xl font-black tracking-tighter", metric.delta && metric.delta > 0 ? "text-emerald-600" : metric.delta && metric.delta < 0 ? "text-rose-600" : "text-slate-900")}>
+                              {formatCompareValue(metric.delta, metric, { signed: true, delta: true })}
+                            </span>
+                          </div>
+                          <div className="text-right">
+                            <span className="block text-[8px] font-black uppercase tracking-widest text-slate-400">% Değişim</span>
+                            <span className={cn("font-mono text-lg font-black tracking-tighter", metric.percentChange && metric.percentChange > 0 ? "text-emerald-600" : metric.percentChange && metric.percentChange < 0 ? "text-rose-600" : "text-slate-900")}>
+                              {metric.hasData ? formatPercentChange(metric.percentChange) : 'Veri yok'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>
