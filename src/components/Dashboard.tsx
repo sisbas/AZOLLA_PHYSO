@@ -78,6 +78,244 @@ const PHENOTYPING_CARD_STYLES: Record<string, string> = {
   violet: 'bg-violet-50 text-violet-700 border-violet-100',
 };
 
+type StressRiskLevel = 'low' | 'medium' | 'high';
+
+type StressMetricSource = 'metrics' | 'phenotyping' | 'segmentation';
+
+interface StressMetricConfig {
+  key: string;
+  label: string;
+  description: string;
+  source: StressMetricSource;
+  unit?: string;
+  digits: number;
+  highIsRisk: boolean;
+  lowThreshold: number;
+  highThreshold: number;
+  percent?: boolean;
+}
+
+const STRESS_METRIC_CONFIG: StressMetricConfig[] = [
+  {
+    key: 'mean_g',
+    label: 'Yeşil kaybı',
+    description: 'Ortalama yeşil kanal yoğunluğu',
+    source: 'metrics',
+    digits: 1,
+    highIsRisk: false,
+    lowThreshold: 75,
+    highThreshold: 120,
+  },
+  {
+    key: 'rg_ratio',
+    label: 'Kırmızı/yeşil oranı',
+    description: 'Klorofil kaybına duyarlı R/G oranı',
+    source: 'metrics',
+    digits: 3,
+    highIsRisk: true,
+    lowThreshold: 0.85,
+    highThreshold: 1.15,
+  },
+  {
+    key: 'glcm_entropy',
+    label: 'Doku heterojenliği',
+    description: 'GLCM entropi ile lokal düzensizlik',
+    source: 'metrics',
+    digits: 3,
+    highIsRisk: true,
+    lowThreshold: 2.5,
+    highThreshold: 4.5,
+  },
+  {
+    key: 'glcm_contrast',
+    label: 'Doku kontrastı',
+    description: 'GLCM kontrast ile leke/nekroz ayrımı',
+    source: 'metrics',
+    digits: 3,
+    highIsRisk: true,
+    lowThreshold: 25,
+    highThreshold: 75,
+  },
+  {
+    key: 'mean_r',
+    label: 'Kırmızılaşma',
+    description: 'Ortalama kırmızı kanal yoğunluğu',
+    source: 'metrics',
+    digits: 1,
+    highIsRisk: true,
+    lowThreshold: 80,
+    highThreshold: 140,
+  },
+  {
+    key: 'mean_b',
+    label: 'Mavi kanal sapması',
+    description: 'Ortalama mavi kanal yoğunluğu',
+    source: 'metrics',
+    digits: 1,
+    highIsRisk: true,
+    lowThreshold: 70,
+    highThreshold: 125,
+  },
+  {
+    key: 'early_stress_prob',
+    label: 'Erken stres olasılığı',
+    description: 'Modelin erken uyarı olasılığı',
+    source: 'metrics',
+    unit: '%',
+    digits: 1,
+    highIsRisk: true,
+    lowThreshold: 0.33,
+    highThreshold: 0.66,
+    percent: true,
+  },
+  {
+    key: 'stress_browning_percent',
+    label: 'Kahverengileşme',
+    description: 'Fenotipleme stres analizi kahverengi alan oranı',
+    source: 'phenotyping',
+    unit: '%',
+    digits: 1,
+    highIsRisk: true,
+    lowThreshold: 10,
+    highThreshold: 25,
+  },
+  {
+    key: 'stress_yellowing_percent',
+    label: 'Sararma',
+    description: 'Fenotipleme stres analizi sarı alan oranı',
+    source: 'phenotyping',
+    unit: '%',
+    digits: 1,
+    highIsRisk: true,
+    lowThreshold: 10,
+    highThreshold: 25,
+  },
+  {
+    key: 'stress_score',
+    label: 'Fenotip stres skoru',
+    description: 'Fenotipleme modülünün bileşik stres skoru',
+    source: 'phenotyping',
+    digits: 3,
+    highIsRisk: true,
+    lowThreshold: 0.33,
+    highThreshold: 0.66,
+  },
+  {
+    key: 'healthScore',
+    label: 'Segmentasyon sağlık skoru',
+    description: 'Segmentasyon çıktısından genel sağlık göstergesi',
+    source: 'segmentation',
+    digits: 3,
+    highIsRisk: false,
+    lowThreshold: 0.45,
+    highThreshold: 0.75,
+  },
+  {
+    key: 'grRatio',
+    label: 'Yeşil/kırmızı dengesi',
+    description: 'Segmentasyon içinde yeşil ağırlıklı renk dengesi',
+    source: 'segmentation',
+    digits: 3,
+    highIsRisk: false,
+    lowThreshold: 0.85,
+    highThreshold: 1.15,
+  },
+  {
+    key: 'contrastScore',
+    label: 'Segmentasyon kontrast skoru',
+    description: 'Segmentasyon maskesinde kontrast kaynaklı stres sinyali',
+    source: 'segmentation',
+    digits: 3,
+    highIsRisk: true,
+    lowThreshold: 0.33,
+    highThreshold: 0.66,
+  },
+];
+
+const STRESS_SOURCE_LABELS: Record<StressMetricSource, string> = {
+  metrics: 'Görüntü metriği',
+  phenotyping: 'Fenotipleme',
+  segmentation: 'Segmentasyon',
+};
+
+const STRESS_RISK_STYLES: Record<StressRiskLevel, { label: string; card: string; bar: string; badge: string; dot: string }> = {
+  low: {
+    label: 'Düşük risk',
+    card: 'bg-emerald-50/80 border-emerald-100 text-emerald-900',
+    bar: 'bg-emerald-500',
+    badge: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+    dot: 'bg-emerald-500',
+  },
+  medium: {
+    label: 'Orta risk',
+    card: 'bg-amber-50/80 border-amber-100 text-amber-900',
+    bar: 'bg-amber-500',
+    badge: 'bg-amber-100 text-amber-700 border-amber-200',
+    dot: 'bg-amber-500',
+  },
+  high: {
+    label: 'Yüksek risk',
+    card: 'bg-rose-50/80 border-rose-100 text-rose-900',
+    bar: 'bg-rose-500',
+    badge: 'bg-rose-100 text-rose-700 border-rose-200',
+    dot: 'bg-rose-500',
+  },
+};
+
+const getNumericValue = (value: unknown): number | null => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
+const getStressMetricValue = (frame: any, config: StressMetricConfig): number | null => {
+  if (config.source === 'phenotyping') {
+    if (config.key === 'stress_browning_percent' || config.key === 'stress_yellowing_percent') {
+      return getPhenotypingValue(frame.phenotyping, config.key as PhenotypingMetricKey);
+    }
+    return getNumericValue(frame.phenotyping?.[config.key] ?? frame.phenotyping?.stres_analizi?.[config.key]);
+  }
+
+  if (config.source === 'segmentation') {
+    return getNumericValue(frame.segmentation?.[config.key]);
+  }
+
+  return getNumericValue(frame.metrics?.[config.key]);
+};
+
+const getStressRisk = (value: number | null, config: StressMetricConfig): StressRiskLevel => {
+  if (value === null) return 'medium';
+
+  if (config.highIsRisk) {
+    if (value >= config.highThreshold) return 'high';
+    if (value >= config.lowThreshold) return 'medium';
+    return 'low';
+  }
+
+  if (value <= config.lowThreshold) return 'high';
+  if (value <= config.highThreshold) return 'medium';
+  return 'low';
+};
+
+const getStressRiskIntensity = (value: number | null, config: StressMetricConfig) => {
+  if (value === null) return 0.5;
+  const range = Math.max(config.highThreshold - config.lowThreshold, Number.EPSILON);
+  const normalized = config.highIsRisk
+    ? (value - config.lowThreshold) / range
+    : (config.highThreshold - value) / range;
+  return Math.max(0.05, Math.min(normalized, 1));
+};
+
+const formatStressMetricValue = (value: number | null, config: StressMetricConfig) => {
+  if (value === null) return 'Veri yok';
+  const displayValue = config.percent && value <= 1 ? value * 100 : value;
+  const formatted = displayValue.toFixed(config.digits);
+  return config.unit ? `${formatted}${config.unit}` : formatted;
+};
+
 export default function Dashboard({ taskId }: DashboardProps) {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -287,6 +525,20 @@ export default function Dashboard({ taskId }: DashboardProps) {
   });
 
   const currentPhenotyping = currentFrame.phenotyping;
+  const stressBreakdownMetrics = STRESS_METRIC_CONFIG.map((metric) => {
+    const value = getStressMetricValue(currentFrame, metric);
+    const risk = getStressRisk(value, metric);
+    return {
+      ...metric,
+      value,
+      risk,
+      intensity: getStressRiskIntensity(value, metric),
+    };
+  }).filter((metric) => {
+    if (metric.source === 'phenotyping') return Boolean(currentFrame.phenotyping) && metric.value !== null;
+    if (metric.source === 'segmentation') return Boolean(currentFrame.segmentation) && metric.value !== null;
+    return true;
+  });
 
   // Statistics calculation
   const totalFrames = data.timeline.length;
@@ -705,6 +957,58 @@ export default function Dashboard({ taskId }: DashboardProps) {
                         )}>
                           {formatPhenotypingValue(value, metric.unit, metric.digits)}
                         </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Stress Breakdown */}
+              <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xl shadow-slate-200/30">
+                <div className="flex items-center justify-between gap-4 mb-6">
+                  <div>
+                    <h3 className="text-[11px] font-bold text-slate-900 uppercase tracking-[0.2em] mb-1">Stres Ayrıştırma</h3>
+                    <p className="text-[10px] text-slate-400">Renk, doku, fenotipleme ve segmentasyon sinyallerinin düşük/orta/yüksek risk ayrımı</p>
+                  </div>
+                  <div className="flex items-center gap-2 text-[9px] font-black uppercase tracking-widest text-slate-400">
+                    {(['low', 'medium', 'high'] as StressRiskLevel[]).map((level) => (
+                      <span key={level} className={cn("inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1", STRESS_RISK_STYLES[level].badge)}>
+                        <span className={cn("h-1.5 w-1.5 rounded-full", STRESS_RISK_STYLES[level].dot)} />
+                        {STRESS_RISK_STYLES[level].label}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                  {stressBreakdownMetrics.map((metric) => {
+                    const style = STRESS_RISK_STYLES[metric.risk];
+                    return (
+                      <div
+                        key={`${metric.source}-${metric.key}`}
+                        className={cn("rounded-xl border p-4 flex flex-col gap-3 min-h-[132px]", style.card)}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <span className="text-[8px] font-black uppercase tracking-widest opacity-60">{STRESS_SOURCE_LABELS[metric.source]}</span>
+                            <h4 className="text-sm font-black tracking-tight text-slate-900 mt-1">{metric.label}</h4>
+                          </div>
+                          <span className={cn("shrink-0 rounded-full border px-2 py-1 text-[8px] font-black uppercase tracking-widest", style.badge)}>
+                            {style.label}
+                          </span>
+                        </div>
+                        <div className="flex items-end justify-between gap-4">
+                          <p className="text-[10px] leading-relaxed text-slate-500 font-medium">{metric.description}</p>
+                          <span className="font-mono text-xl font-black tracking-tighter text-slate-950 whitespace-nowrap">
+                            {formatStressMetricValue(metric.value, metric)}
+                          </span>
+                        </div>
+                        <div className="h-1.5 w-full rounded-full bg-white/80 overflow-hidden border border-white/70">
+                          <motion.div
+                            initial={{ width: 0 }}
+                            animate={{ width: `${Math.round(metric.intensity * 100)}%` }}
+                            className={cn("h-full rounded-full", style.bar)}
+                          />
+                        </div>
                       </div>
                     );
                   })}
