@@ -372,6 +372,103 @@ const formatPercentChange = (value: number | null) => {
 };
 
 
+type ChartMetricKey =
+  | 'score'
+  | 'prob'
+  | 'coverage'
+  | 'fronds'
+  | 'rg_ratio'
+  | 'mean_g'
+  | 'glcm_entropy'
+  | 'mean_size_px'
+  | 'chlorophyll_index'
+  | 'fresh_biomass_g_m2'
+  | 'stress_browning_percent'
+  | 'stress_yellowing_percent';
+
+interface ChartMetricConfig {
+  key: ChartMetricKey;
+  label: string;
+  unit: string;
+  digits: number;
+  color: string;
+  strokeDasharray?: string;
+  reference?: {
+    value: number;
+    label: string;
+    color: string;
+    whenSelected?: ChartMetricKey;
+  };
+}
+
+const CHART_METRICS: ChartMetricConfig[] = [
+  { key: 'score', label: 'Stres Yoğunluğu', unit: '', digits: 3, color: '#ef4444' },
+  {
+    key: 'prob',
+    label: 'Stres Olasılığı',
+    unit: '%',
+    digits: 1,
+    color: '#0f172a',
+    strokeDasharray: '3 6',
+    reference: { value: 0.66, label: 'Stres eşiği %66', color: '#fb7185' },
+  },
+  { key: 'coverage', label: 'Kapsama', unit: '%', digits: 1, color: '#10b981', strokeDasharray: '6 4' },
+  { key: 'fronds', label: 'Frond Sayısı', unit: '', digits: 0, color: '#06b6d4', strokeDasharray: '8 4' },
+  { key: 'rg_ratio', label: 'R/G Oranı', unit: '', digits: 3, color: '#f97316' },
+  { key: 'mean_g', label: 'Ortalama Yeşil', unit: '', digits: 1, color: '#22c55e' },
+  { key: 'glcm_entropy', label: 'GLCM Entropi', unit: '', digits: 3, color: '#a855f7' },
+  { key: 'mean_size_px', label: 'Ortalama Boyut', unit: 'px', digits: 1, color: '#64748b' },
+  {
+    key: 'chlorophyll_index',
+    label: 'Klorofil İndeksi',
+    unit: '',
+    digits: 3,
+    color: '#84cc16',
+    strokeDasharray: '2 4',
+    reference: { value: 2.5, label: 'Düşük klorofil 2.5', color: '#65a30d' },
+  },
+  { key: 'fresh_biomass_g_m2', label: 'Taze Biyokütle', unit: 'g/m²', digits: 1, color: '#8b5cf6', strokeDasharray: '10 4' },
+  {
+    key: 'stress_browning_percent',
+    label: 'Kahverengileşme',
+    unit: '%',
+    digits: 1,
+    color: '#b45309',
+    reference: { value: 25, label: 'Yüksek browning %25', color: '#92400e' },
+  },
+  {
+    key: 'stress_yellowing_percent',
+    label: 'Sararma',
+    unit: '%',
+    digits: 1,
+    color: '#eab308',
+    reference: { value: 25, label: 'Yüksek yellowing %25', color: '#ca8a04' },
+  },
+];
+
+const DEFAULT_CHART_METRICS: ChartMetricKey[] = ['prob', 'score', 'chlorophyll_index', 'fresh_biomass_g_m2'];
+
+const getChartMetricValue = (frame: any, key: ChartMetricKey): number | null => {
+  if (!frame) return null;
+
+  if (key === 'score') return getNumericValue(frame.metrics?.mean_stress_score);
+  if (key === 'prob') return getNumericValue(frame.metrics?.early_stress_prob);
+  if (key === 'coverage') return getCoverageValue(frame);
+  if (key === 'fronds') return getFrondValue(frame);
+  if (key === 'chlorophyll_index' || key === 'fresh_biomass_g_m2' || key === 'stress_browning_percent' || key === 'stress_yellowing_percent') {
+    return getPhenotypingValue(frame.phenotyping, key as PhenotypingMetricKey);
+  }
+
+  return getNumericValue(frame.metrics?.[key]);
+};
+
+const formatChartMetricValue = (value: number | null | undefined, metric: ChartMetricConfig) => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 'Veri yok';
+  const displayValue = metric.key === 'prob' ? value * 100 : value;
+  return `${displayValue.toFixed(metric.digits)}${metric.unit}`;
+};
+
+
 type SummaryMetric = {
   label: string;
   value: string;
@@ -540,6 +637,8 @@ export default function Dashboard({ taskId }: DashboardProps) {
   const [interpretation, setInterpretation] = useState<string>('');
   const [interpretationError, setInterpretationError] = useState<string>('');
   const [isInterpreting, setIsInterpreting] = useState(false);
+  const [selectedChartMetrics, setSelectedChartMetrics] = useState<ChartMetricKey[]>(DEFAULT_CHART_METRICS);
+  const [normalizeChart, setNormalizeChart] = useState(true);
 
   useEffect(() => {
     const fetchResults = async () => {
@@ -722,31 +821,79 @@ export default function Dashboard({ taskId }: DashboardProps) {
     document.body.removeChild(link);
   };
 
-  const biomassSeries = data.timeline
-    .map((frame: any) => getPhenotypingValue(frame.phenotyping, 'fresh_biomass_g_m2'))
-    .filter((value: number | null): value is number => value !== null);
-  const maxFreshBiomass = Math.max(...biomassSeries, 1);
+  const metricStats = CHART_METRICS.reduce((acc, metric) => {
+    const values = data.timeline
+      .map((frame: any) => getChartMetricValue(frame, metric.key))
+      .filter((value: number | null): value is number => value !== null);
+    const min = values.length > 0 ? Math.min(...values) : null;
+    const max = values.length > 0 ? Math.max(...values) : null;
+
+    acc[metric.key] = {
+      hasData: values.length > 0,
+      min,
+      max,
+    };
+    return acc;
+  }, {} as Record<ChartMetricKey, { hasData: boolean; min: number | null; max: number | null }>);
+
+  const normalizeChartValue = (key: ChartMetricKey, value: number | null) => {
+    if (value === null) return null;
+    const stats = metricStats[key];
+    if (!stats || stats.min === null || stats.max === null) return null;
+    const range = stats.max - stats.min;
+    if (Math.abs(range) <= Number.EPSILON) return 0.5;
+    return (value - stats.min) / range;
+  };
+
+  const getDisplayChartValue = (key: ChartMetricKey, value: number | null) => (
+    normalizeChart ? normalizeChartValue(key, value) : value
+  );
 
   const chartData = data.timeline.map((frame: any, idx: number) => {
-    const phenotyping = frame.phenotyping;
-    const phenoCoverageRaw = getPhenotypingValue(phenotyping, 'coverage_percent');
-    const phenoChlorophyllRaw = getPhenotypingValue(phenotyping, 'chlorophyll_index');
-    const phenoBiomassRaw = getPhenotypingValue(phenotyping, 'fresh_biomass_g_m2');
+    const rawValues = CHART_METRICS.reduce((acc, metric) => {
+      acc[metric.key] = getChartMetricValue(frame, metric.key);
+      return acc;
+    }, {} as Record<ChartMetricKey, number | null>);
 
     return {
       time: idx,
-      score: frame.metrics.mean_stress_score,
-      prob: frame.metrics.early_stress_prob,
-      coverage: frame.metrics.coverage_pct,
-      fronds: frame.metrics.frond_count,
-      phenoCoverage: normalizePercent(phenoCoverageRaw),
-      phenoChlorophyll: normalizeChlorophyll(phenoChlorophyllRaw),
-      phenoBiomass: phenoBiomassRaw === null ? null : Math.max(0, Math.min(phenoBiomassRaw / maxFreshBiomass, 1)),
-      phenoCoverageRaw,
-      phenoChlorophyllRaw,
-      phenoBiomassRaw
+      ...rawValues,
+      phenoCoverage: normalizePercent(rawValues.coverage),
+      phenoChlorophyll: normalizeChlorophyll(rawValues.chlorophyll_index),
+      phenoBiomass: normalizeChartValue('fresh_biomass_g_m2', rawValues.fresh_biomass_g_m2),
+      phenoCoverageRaw: rawValues.coverage,
+      phenoChlorophyllRaw: rawValues.chlorophyll_index,
+      phenoBiomassRaw: rawValues.fresh_biomass_g_m2,
+      ...CHART_METRICS.reduce((acc, metric) => {
+        acc[`${metric.key}Display`] = getDisplayChartValue(metric.key, rawValues[metric.key]);
+        return acc;
+      }, {} as Record<string, number | null>),
     };
   });
+
+  const selectedChartMetricConfigs = CHART_METRICS.filter((metric) => selectedChartMetrics.includes(metric.key));
+  const enabledSelectedChartMetricConfigs = selectedChartMetricConfigs.filter((metric) => metricStats[metric.key]?.hasData);
+  const rawChartValues = selectedChartMetricConfigs.flatMap((metric) => chartData
+    .map((row: any) => row[metric.key])
+    .filter((value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)));
+  const rawMin = rawChartValues.length > 0 ? Math.min(...rawChartValues) : 0;
+  const rawMax = rawChartValues.length > 0 ? Math.max(...rawChartValues) : 1;
+  const rawPadding = Math.max((rawMax - rawMin) * 0.1, 1);
+  const chartDomain = normalizeChart ? [0, 1] : [rawMin - rawPadding, rawMax + rawPadding];
+
+  const getReferenceLineValue = (metric: ChartMetricConfig) => {
+    if (!metric.reference || !selectedChartMetrics.includes(metric.key) || !metricStats[metric.key]?.hasData) return null;
+    return normalizeChart ? normalizeChartValue(metric.key, metric.reference.value) : metric.reference.value;
+  };
+
+  const toggleChartMetric = (key: ChartMetricKey) => {
+    if (!metricStats[key]?.hasData) return;
+    setSelectedChartMetrics((selected) => (
+      selected.includes(key)
+        ? selected.filter((selectedKey) => selectedKey !== key)
+        : [...selected, key]
+    ));
+  };
 
   const compareStartFrame = data.timeline[compareStartIndex] || data.timeline[0];
   const compareEndFrame = data.timeline[compareEndIndex] || data.timeline[Math.min(1, data.timeline.length - 1)] || data.timeline[0];
@@ -1385,74 +1532,94 @@ export default function Dashboard({ taskId }: DashboardProps) {
 
               {/* Bottom Row: Large Chart */}
               <div className="bg-white border border-slate-200 rounded-2xl p-8 shadow-xl shadow-slate-200/30">
-                 <div className="flex items-center justify-between mb-10">
+                 <div className="flex flex-col xl:flex-row xl:items-start justify-between gap-6 mb-8">
                     <div>
                       <h3 className="text-[11px] font-bold text-slate-900 uppercase tracking-[0.2em] mb-1">Temporal Stress Kinematics</h3>
-                      <p className="text-[10px] text-slate-400">Zamana bağlı fizyolojik stres eğilimi ve varyans analizi</p>
+                      <p className="text-[10px] text-slate-400">Seçilebilir fizyolojik metrikler, normalize görünüm ve kritik eşik çizgileri</p>
                     </div>
-                    <div className="flex flex-wrap justify-end gap-x-6 gap-y-2 text-[9px] font-bold text-slate-500 uppercase tracking-widest">
-                       <div className="flex items-center gap-2">
-                          <div className="w-3 h-1 bg-slate-900 rounded-full" /> Probability
-                       </div>
-                       <div className="flex items-center gap-2">
-                          <div className="w-3 h-1 bg-rose-500 rounded-full" /> Intensity
-                       </div>
-                       <div className="flex items-center gap-2">
-                          <div className="w-3 h-1 bg-emerald-500 rounded-full" /> Kapsama
-                       </div>
-                       <div className="flex items-center gap-2">
-                          <div className="w-3 h-1 bg-lime-500 rounded-full" /> Klorofil
-                       </div>
-                       <div className="flex items-center gap-2">
-                          <div className="w-3 h-1 bg-violet-500 rounded-full" /> Biyokütle
-                       </div>
-                    </div>
+                    <label className="inline-flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-[10px] font-black uppercase tracking-widest text-slate-600">
+                      <input
+                        type="checkbox"
+                        checked={normalizeChart}
+                        onChange={(event) => setNormalizeChart(event.target.checked)}
+                        className="h-4 w-4 accent-slate-900"
+                      />
+                      Normalize Görünüm
+                    </label>
                  </div>
-                 <div className="h-[280px] w-full">
+
+                 <div className="mb-8 rounded-2xl border border-slate-100 bg-slate-50/70 p-4">
+                   <div className="mb-3 flex items-center justify-between gap-3">
+                     <span className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400">Grafik Metrikleri</span>
+                     <span className="text-[9px] font-bold text-slate-400">Veri olmayan metrikler pasiftir</span>
+                   </div>
+                   <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-2">
+                     {CHART_METRICS.map((metric) => {
+                       const hasData = metricStats[metric.key]?.hasData;
+                       const selected = selectedChartMetrics.includes(metric.key);
+                       return (
+                         <label
+                           key={metric.key}
+                           className={cn(
+                             "flex items-center gap-2 rounded-xl border px-3 py-2 text-[9px] font-black uppercase tracking-tight transition-all",
+                             hasData
+                               ? "cursor-pointer bg-white border-slate-200 text-slate-700 hover:border-slate-300"
+                               : "cursor-not-allowed bg-slate-100 border-slate-100 text-slate-300",
+                             selected && hasData && "ring-2 ring-slate-900/10 border-slate-300"
+                           )}
+                         >
+                           <input
+                             type="checkbox"
+                             checked={selected && hasData}
+                             disabled={!hasData}
+                             onChange={() => toggleChartMetric(metric.key)}
+                             className="h-3.5 w-3.5 accent-slate-900 disabled:accent-slate-200"
+                           />
+                           <span className="h-2 w-2 rounded-full" style={{ backgroundColor: hasData ? metric.color : '#cbd5e1' }} />
+                           <span className="truncate">{metric.label}</span>
+                         </label>
+                       );
+                     })}
+                   </div>
+                 </div>
+
+                 <div className="mb-6 flex flex-wrap justify-end gap-x-5 gap-y-2 text-[9px] font-bold text-slate-500 uppercase tracking-widest">
+                   {enabledSelectedChartMetricConfigs.map((metric) => (
+                     <div key={metric.key} className="flex items-center gap-2">
+                       <div className="w-3 h-1 rounded-full" style={{ backgroundColor: metric.color }} /> {metric.label}
+                     </div>
+                   ))}
+                 </div>
+
+                 <div className="h-[360px] w-full">
                     <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={chartData}>
-                        <defs>
-                          <linearGradient id="colorScore" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#ef4444" stopOpacity={0.1}/>
-                            <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
-                          </linearGradient>
-                        </defs>
+                      <LineChart data={chartData} margin={{ top: 18, right: 24, bottom: 8, left: 8 }}>
                         <XAxis dataKey="time" hide />
-                        <YAxis hide domain={[0, 1]} />
+                        <YAxis hide domain={chartDomain} />
                         <CartesianGrid vertical={false} stroke="#f1f5f9" strokeDasharray="8 8" />
                         <Tooltip 
                           cursor={{ stroke: '#e2e8f0', strokeWidth: 2 }}
                           content={({ active, payload }) => {
                             if (active && payload && payload.length) {
                               const row = payload[0]?.payload || {};
-                              const findValue = (key: string) => payload.find((item: any) => item.dataKey === key)?.value as number | null | undefined;
-                              const scoreValue = findValue('score');
-                              const probValue = findValue('prob');
 
                               return (
-                                <div className="bg-slate-900 text-white p-4 rounded-xl shadow-2xl border border-white/10 min-w-[180px]">
-                                  <p className="text-[8px] font-bold uppercase tracking-widest opacity-40 mb-3">Temporal Node</p>
+                                <div className="bg-slate-900 text-white p-4 rounded-xl shadow-2xl border border-white/10 min-w-[220px]">
+                                  <p className="text-[8px] font-bold uppercase tracking-widest opacity-40 mb-3">Temporal Node #{(row.time ?? 0) + 1}</p>
                                   <div className="space-y-2">
-                                    <div className="flex justify-between items-center gap-4">
-                                      <span className="text-[9px] font-bold text-rose-400 uppercase">Intensity</span>
-                                      <span className="text-xs font-mono font-bold">{typeof scoreValue === 'number' ? scoreValue.toFixed(3) : 'Veri yok'}</span>
-                                    </div>
-                                    <div className="flex justify-between items-center gap-4">
-                                      <span className="text-[9px] font-bold text-white uppercase">Prob</span>
-                                      <span className="text-xs font-mono font-bold">{typeof probValue === 'number' ? probValue.toFixed(3) : 'Veri yok'}</span>
-                                    </div>
-                                    <div className="flex justify-between items-center gap-4">
-                                      <span className="text-[9px] font-bold text-emerald-300 uppercase">Kapsama</span>
-                                      <span className="text-xs font-mono font-bold">{formatPhenotypingValue(row.phenoCoverageRaw ?? null, '%', 1)}</span>
-                                    </div>
-                                    <div className="flex justify-between items-center gap-4">
-                                      <span className="text-[9px] font-bold text-lime-300 uppercase">Klorofil</span>
-                                      <span className="text-xs font-mono font-bold">{formatPhenotypingValue(row.phenoChlorophyllRaw ?? null, '', 3)}</span>
-                                    </div>
-                                    <div className="flex justify-between items-center gap-4">
-                                      <span className="text-[9px] font-bold text-violet-300 uppercase">Biyokütle</span>
-                                      <span className="text-xs font-mono font-bold">{formatPhenotypingValue(row.phenoBiomassRaw ?? null, 'g/m²', 1)}</span>
-                                    </div>
+                                    {enabledSelectedChartMetricConfigs.map((metric) => {
+                                      const rawValue = row[metric.key] as number | null | undefined;
+                                      const displayValue = normalizeChart ? row[`${metric.key}Display`] : rawValue;
+                                      return (
+                                        <div key={metric.key} className="flex justify-between items-center gap-4">
+                                          <span className="text-[9px] font-bold uppercase" style={{ color: metric.color }}>{metric.label}</span>
+                                          <span className="text-xs font-mono font-bold">
+                                            {formatChartMetricValue(rawValue, metric)}
+                                            {normalizeChart && typeof displayValue === 'number' && Number.isFinite(displayValue) ? ` (${displayValue.toFixed(2)}n)` : ''}
+                                          </span>
+                                        </div>
+                                      );
+                                    })}
                                   </div>
                                 </div>
                               );
@@ -1460,19 +1627,47 @@ export default function Dashboard({ taskId }: DashboardProps) {
                             return null;
                           }}
                         />
-                        <Line type="monotone" dataKey="score" stroke="#ef4444" strokeWidth={4} dot={{ r: 0 }} activeDot={{ r: 6, strokeWidth: 0 }} animationDuration={1500} connectNulls />
-                        <Line type="monotone" dataKey="prob" stroke="#0f172a" strokeWidth={2} strokeDasharray="3 6" dot={{ r: 0 }} activeDot={{ r: 4 }} animationDuration={1000} connectNulls />
-                        <Line type="monotone" dataKey="phenoCoverage" stroke="#10b981" strokeWidth={2} strokeDasharray="6 4" dot={{ r: 0 }} activeDot={{ r: 4 }} animationDuration={1100} connectNulls />
-                        <Line type="monotone" dataKey="phenoChlorophyll" stroke="#84cc16" strokeWidth={2} strokeDasharray="2 4" dot={{ r: 0 }} activeDot={{ r: 4 }} animationDuration={1200} connectNulls />
-                        <Line type="monotone" dataKey="phenoBiomass" stroke="#8b5cf6" strokeWidth={2} strokeDasharray="10 4" dot={{ r: 0 }} activeDot={{ r: 4 }} animationDuration={1300} connectNulls />
+                        {CHART_METRICS.map((metric) => {
+                          const yValue = getReferenceLineValue(metric);
+                          if (yValue === null) return null;
+                          return (
+                            <ReferenceLine
+                              key={`${metric.key}-reference`}
+                              y={yValue}
+                              stroke={metric.reference!.color}
+                              strokeDasharray="4 4"
+                              strokeWidth={1.5}
+                              label={{ value: metric.reference!.label, fill: metric.reference!.color, fontSize: 10, fontWeight: 700 }}
+                            />
+                          );
+                        })}
+                        {enabledSelectedChartMetricConfigs.map((metric, index) => (
+                          <Line
+                            key={metric.key}
+                            type="monotone"
+                            dataKey={`${metric.key}Display`}
+                            stroke={metric.color}
+                            strokeWidth={metric.key === 'score' ? 4 : 2.5}
+                            strokeDasharray={metric.strokeDasharray}
+                            dot={{ r: 0 }}
+                            activeDot={{ r: 5, strokeWidth: 0 }}
+                            animationDuration={900 + index * 90}
+                            connectNulls
+                          />
+                        ))}
                         <ReferenceLine x={currentIndex} stroke="#0f172a" strokeWidth={1} isFront />
                       </LineChart>
                     </ResponsiveContainer>
                  </div>
-                 <div className="flex justify-between mt-8 px-4 text-[9px] font-bold text-slate-400 uppercase tracking-[0.3em] border-t border-slate-100 pt-6">
-                    <span className="flex items-center gap-2"><div className="w-1 h-1 rounded-full bg-slate-300" /> T_START</span>
-                    <span>AZOLLA_SEQUENCE_CHART</span>
-                    <span className="flex items-center gap-2">T_LATEST <div className="w-1 h-1 rounded-full bg-slate-900" /></span>
+                 <div className="flex flex-col gap-3 mt-8 px-4 text-[9px] font-bold text-slate-400 uppercase tracking-[0.3em] border-t border-slate-100 pt-6">
+                    <div className="flex justify-between">
+                      <span className="flex items-center gap-2"><div className="w-1 h-1 rounded-full bg-slate-300" /> T_START</span>
+                      <span>AZOLLA_SEQUENCE_CHART</span>
+                      <span className="flex items-center gap-2">T_LATEST <div className="w-1 h-1 rounded-full bg-slate-900" /></span>
+                    </div>
+                    <div className="text-center tracking-widest text-slate-300">
+                      {normalizeChart ? 'Normalize mod: her metrik kendi min/max aralığında 0–1 ölçeğine taşınır.' : 'Ham mod: seçili metrikler gerçek değerleriyle çizilir.'}
+                    </div>
                  </div>
               </div>
             </motion.div>
