@@ -371,6 +371,163 @@ const formatPercentChange = (value: number | null) => {
   return `${value > 0 ? '+' : ''}${value.toFixed(1)}%`;
 };
 
+
+type SummaryMetric = {
+  label: string;
+  value: string;
+  detail: string;
+};
+
+type SummaryReport = {
+  successfulFrames: number;
+  totalFrames: number;
+  metrics: SummaryMetric[];
+  findings: string[];
+};
+
+const isSuccessfulTimelineFrame = (frame: any) => {
+  const status = String(frame?.status ?? '').toLowerCase();
+  return status !== 'failed' && Boolean(frame?.metrics);
+};
+
+const average = (values: number[]) => (
+  values.length > 0 ? values.reduce((sum, value) => sum + value, 0) / values.length : null
+);
+
+const firstAndLastValues = (frames: any[], getter: (frame: any) => number | null) => {
+  const values = frames
+    .map((frame) => getter(frame))
+    .filter((value): value is number => value !== null);
+
+  if (values.length === 0) return { first: null, last: null, delta: null, percentChange: null, count: 0 };
+
+  const first = values[0];
+  const last = values[values.length - 1];
+  const delta = last - first;
+  const percentChange = Math.abs(first) > Number.EPSILON ? (delta / Math.abs(first)) * 100 : null;
+
+  return { first, last, delta, percentChange, count: values.length };
+};
+
+const formatSignedNumber = (value: number | null, digits = 1, unit = '') => {
+  if (value === null) return 'Veri yok';
+  const prefix = value > 0 ? '+' : '';
+  return `${prefix}${value.toFixed(digits)}${unit}`;
+};
+
+const getCoverageValue = (frame: any) => (
+  getPhenotypingValue(frame.phenotyping, 'coverage_percent') ?? getNumericValue(frame.metrics?.coverage_pct)
+);
+
+const getFrondValue = (frame: any) => getNumericValue(frame.metrics?.frond_count);
+const getStressProbability = (frame: any) => getNumericValue(frame.metrics?.early_stress_prob ?? frame.metrics?.mean_stress_score);
+const getChlorophyllValue = (frame: any) => getPhenotypingValue(frame.phenotyping, 'chlorophyll_index');
+const getBiomassValue = (frame: any) => getPhenotypingValue(frame.phenotyping, 'fresh_biomass_g_m2');
+
+const buildSummaryReport = (timeline: any[]): SummaryReport => {
+  const successfulFrames = timeline.filter(isSuccessfulTimelineFrame);
+  const sourceFrames = successfulFrames;
+  const stressValues = sourceFrames
+    .map((frame) => getStressProbability(frame))
+    .filter((value): value is number => value !== null);
+  const avgStressValue = average(stressValues);
+  const maxStressValue = stressValues.length > 0 ? Math.max(...stressValues) : null;
+  const stressChange = firstAndLastValues(sourceFrames, getStressProbability);
+  const coverageChange = firstAndLastValues(sourceFrames, getCoverageValue);
+  const frondChange = firstAndLastValues(sourceFrames, getFrondValue);
+  const chlorophyllTrend = firstAndLastValues(sourceFrames, getChlorophyllValue);
+  const biomassTrend = firstAndLastValues(sourceFrames, getBiomassValue);
+  const latestCoverage = coverageChange.last;
+  const latestFronds = frondChange.last;
+  const latestChlorophyll = chlorophyllTrend.last;
+  const latestReliable = sourceFrames[sourceFrames.length - 1]?.metrics?.is_reliable;
+  const unreliableCount = sourceFrames.filter((frame) => frame.metrics?.is_reliable === false || frame.metrics?.plausible === false).length;
+
+  const findings: string[] = [];
+
+  if (stressChange.delta !== null && stressChange.delta > 0.05) {
+    findings.push(`Stres artıyor: ilk başarılı karede ${(stressChange.first! * 100).toFixed(1)}%, son başarılı karede ${(stressChange.last! * 100).toFixed(1)}% (değişim ${formatSignedNumber(stressChange.delta * 100, 1, ' yüzde puan')}).`);
+  } else if (stressChange.delta !== null && stressChange.delta < -0.05) {
+    findings.push(`Stres azalıyor: ilk başarılı karede ${(stressChange.first! * 100).toFixed(1)}%, son başarılı karede ${(stressChange.last! * 100).toFixed(1)}% (değişim ${formatSignedNumber(stressChange.delta * 100, 1, ' yüzde puan')}).`);
+  }
+
+  if (avgStressValue !== null && avgStressValue >= 0.6) {
+    findings.push(`Ortalama stres yüksek: başarılı kare ortalaması ${(avgStressValue * 100).toFixed(1)}% ve eşik %60 üzerinde.`);
+  }
+
+  if (maxStressValue !== null && maxStressValue >= 0.8) {
+    findings.push(`Maksimum stres kritik: en yüksek değer ${(maxStressValue * 100).toFixed(1)}% ve eşik %80 üzerinde.`);
+  }
+
+  if (coverageChange.delta !== null && coverageChange.delta < -2) {
+    findings.push(`Kapsama düşüyor: ${coverageChange.first!.toFixed(1)}% → ${coverageChange.last!.toFixed(1)}% (değişim ${formatSignedNumber(coverageChange.delta, 1, ' yüzde puan')}).`);
+  }
+
+  if (latestChlorophyll !== null && latestChlorophyll < 2.5) {
+    findings.push(`Klorofil düşük: son ölçüm ${latestChlorophyll.toFixed(3)} ve 2.500 eşik değerinin altında.`);
+  }
+
+  if (latestCoverage !== null && latestCoverage > 85) {
+    findings.push(`Yoğunluk yüksek: son kapsama ${latestCoverage.toFixed(1)}%, su yüzeyi/alan sıkışması riski artabilir.`);
+  }
+
+  if (latestFronds !== null && latestFronds > 1000) {
+    findings.push(`Frond yoğunluğu yüksek: son frond sayısı ${latestFronds.toFixed(0)}, ayrışma/üst üste binme kaynaklı yoğunluk riski izlenmeli.`);
+  }
+
+  if (latestReliable === false || unreliableCount > 0) {
+    findings.push(`QC düşük: ${unreliableCount}/${sourceFrames.length} başarılı karede güvenilirlik veya frond plausibility uyarısı var.`);
+  }
+
+  if (biomassTrend.delta !== null && biomassTrend.delta < 0) {
+    findings.push(`Biyokütle trendi negatif: ${biomassTrend.first!.toFixed(1)} g/m² → ${biomassTrend.last!.toFixed(1)} g/m² (değişim ${formatSignedNumber(biomassTrend.delta, 1, ' g/m²')}).`);
+  }
+
+  if (sourceFrames.length === 0) {
+    findings.push('Başarılı timeline karesi bulunamadı; deterministik özet için kullanılabilir metrik yok.');
+  } else if (findings.length === 0) {
+    findings.push('Belirgin deterministik uyarı oluşmadı: stres, kapsama, klorofil, yoğunluk ve QC kuralları kritik eşikleri aşmadı.');
+  }
+
+  return {
+    successfulFrames: successfulFrames.length,
+    totalFrames: timeline.length,
+    metrics: [
+      {
+        label: 'Ortalama stres',
+        value: avgStressValue === null ? 'Veri yok' : `${(avgStressValue * 100).toFixed(1)}%`,
+        detail: `${stressValues.length} başarılı kare üzerinden early_stress_prob ortalaması`,
+      },
+      {
+        label: 'Maksimum stres',
+        value: maxStressValue === null ? 'Veri yok' : `${(maxStressValue * 100).toFixed(1)}%`,
+        detail: `${stressValues.length} başarılı kare içinde gözlenen en yüksek stres`,
+      },
+      {
+        label: 'Kapsama değişimi',
+        value: formatSignedNumber(coverageChange.delta, 1, ' yüzde puan'),
+        detail: coverageChange.first === null ? 'Veri yok' : `${coverageChange.first.toFixed(1)}% → ${coverageChange.last!.toFixed(1)}% (${formatPercentChange(coverageChange.percentChange)})`,
+      },
+      {
+        label: 'Frond değişimi',
+        value: formatSignedNumber(frondChange.delta, 0, ''),
+        detail: frondChange.first === null ? 'Veri yok' : `${frondChange.first.toFixed(0)} → ${frondChange.last!.toFixed(0)} frond (${formatPercentChange(frondChange.percentChange)})`,
+      },
+      {
+        label: 'Klorofil trendi',
+        value: formatSignedNumber(chlorophyllTrend.delta, 3, ''),
+        detail: chlorophyllTrend.first === null ? 'Veri yok' : `${chlorophyllTrend.first.toFixed(3)} → ${chlorophyllTrend.last!.toFixed(3)} indeks (${chlorophyllTrend.count} ölçüm)`,
+      },
+      {
+        label: 'Biyokütle trendi',
+        value: formatSignedNumber(biomassTrend.delta, 1, ' g/m²'),
+        detail: biomassTrend.first === null ? 'Veri yok' : `${biomassTrend.first.toFixed(1)} → ${biomassTrend.last!.toFixed(1)} g/m² (${biomassTrend.count} ölçüm)`,
+      },
+    ],
+    findings,
+  };
+};
+
 export default function Dashboard({ taskId }: DashboardProps) {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -381,6 +538,7 @@ export default function Dashboard({ taskId }: DashboardProps) {
   const [viewMode, setViewMode] = useState<'rgb' | 'pseudo' | 'overlay' | 'isolated'>('isolated');
   const [activeTab, setActiveTab] = useState<'analysis' | 'stats' | 'insights'>('analysis');
   const [interpretation, setInterpretation] = useState<string>('');
+  const [interpretationError, setInterpretationError] = useState<string>('');
   const [isInterpreting, setIsInterpreting] = useState(false);
 
   useEffect(() => {
@@ -439,7 +597,8 @@ export default function Dashboard({ taskId }: DashboardProps) {
   }, [data]);
 
   const generateAIInterpretation = async (stats: any) => {
-    if (interpretation || isInterpreting) return;
+    if (interpretation || interpretationError || isInterpreting) return;
+    setInterpretationError('');
     setIsInterpreting(true);
     try {
       const prompt = `Azolla pinnata bitkisi üzerinde yapılan fizyolojik stres analizinin sonuçlarını teknik ve bilimsel bir dille yorumla.
@@ -477,17 +636,17 @@ export default function Dashboard({ taskId }: DashboardProps) {
       }
 
       const data = await response.json();
-      setInterpretation(data.text || 'Yorum oluşturulamadı.');
+      setInterpretation(data.text || '');
     } catch (err) {
       console.error("AI Error:", err);
-      setInterpretation('Analiz yorumu oluşturulurken bir hata oluştu. Lütfen parametreleri kontrol edin.');
+      setInterpretationError('AI yorumu alınamadı; deterministik özet rapor gösterilmeye devam ediyor.');
     } finally {
       setIsInterpreting(false);
     }
   };
 
   useEffect(() => {
-    if (activeTab === 'insights' && data && !interpretation) {
+    if (activeTab === 'insights' && data && !interpretation && !interpretationError) {
       generateAIInterpretation({
         totalFrames,
         avgStress,
@@ -636,6 +795,8 @@ export default function Dashboard({ taskId }: DashboardProps) {
     acc[status] = (acc[status] || 0) + 1;
     return acc;
   }, {});
+
+  const summaryReport = buildSummaryReport(data.timeline);
 
   const pieData = Object.keys(statusCounts).map(key => ({
     name: key,
@@ -1329,7 +1490,7 @@ export default function Dashboard({ taskId }: DashboardProps) {
                   </div>
                   <div>
                     <h2 className="text-3xl font-black tracking-tighter text-slate-900 uppercase">Bilimsel Analiz & Interpretasyon</h2>
-                    <p className="text-sm text-slate-500 font-medium tracking-tight">Üretken Yapay Zeka (GenAI) destekli fizyolojik durum raporu</p>
+                    <p className="text-sm text-slate-500 font-medium tracking-tight">Deterministik özet rapor ve varsa ayrı AI yorumu</p>
                   </div>
                </div>
 
@@ -1337,32 +1498,82 @@ export default function Dashboard({ taskId }: DashboardProps) {
                   <div className="absolute top-0 right-0 p-8 opacity-[0.03] pointer-events-none">
                     <Sparkles size={120} />
                   </div>
-                  
-                  {isInterpreting ? (
-                    <div className="flex flex-col items-center justify-center py-20 gap-6">
-                      <div className="relative">
-                        <Loader2 className="animate-spin text-slate-200" size={64} />
-                        <BrainCircuit className="absolute inset-0 m-auto text-slate-900 animate-pulse" size={24} />
+
+                  <div className="relative space-y-8">
+                    <section className="space-y-5">
+                      <div className="flex flex-col gap-2">
+                        <span className="text-[10px] font-black uppercase tracking-[0.3em] text-emerald-600">Özet Rapor</span>
+                        <h3 className="text-2xl font-black text-slate-900 tracking-tight">Deterministik Fizyolojik Değerlendirme</h3>
+                        <p className="text-sm font-medium text-slate-500 leading-relaxed">
+                          Bu rapor, AI yorumundan bağımsız olarak {summaryReport.successfulFrames}/{summaryReport.totalFrames} başarılı timeline karesi üzerinden hesaplandı; kullanılan tüm sayısal değerler aşağıda açıkça verilmiştir.
+                        </p>
                       </div>
-                      <div className="text-center space-y-2">
-                        <p className="font-mono text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Processing Insights...</p>
-                        <p className="text-sm font-bold text-slate-600">Yapay zeka verileri analiz ediyor ve raporu hazırlıyor.</p>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="prose prose-slate max-w-none prose-headings:uppercase prose-headings:tracking-widest prose-headings:text-slate-900 prose-p:text-slate-600 prose-p:leading-relaxed prose-strong:text-slate-900">
-                      <div className="whitespace-pre-wrap font-sans text-lg leading-relaxed text-slate-700">
-                        {interpretation.split('\n').map((line, i) => (
-                          <p key={i} className={cn(
-                            "mb-4",
-                            line.startsWith('#') ? "text-xl font-black text-slate-900 uppercase tracking-tighter mt-8 mb-2" : ""
-                          )}>
-                            {line.replace(/^#+\s*/, '')}
-                          </p>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                        {summaryReport.metrics.map((metric) => (
+                          <div key={metric.label} className="bg-slate-50 border border-slate-100 rounded-2xl p-5">
+                            <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">{metric.label}</div>
+                            <div className="text-2xl font-black font-mono text-slate-900 tracking-tight">{metric.value}</div>
+                            <p className="text-[11px] font-bold text-slate-500 leading-relaxed mt-2">{metric.detail}</p>
+                          </div>
                         ))}
                       </div>
-                    </div>
-                  )}
+
+                      <div className="bg-emerald-50/70 border border-emerald-100 rounded-2xl p-6 space-y-4">
+                        <div className="flex items-center gap-2">
+                          <ListChecks size={18} className="text-emerald-600" />
+                          <h4 className="text-sm font-black text-emerald-900 uppercase tracking-tight">Kural Tabanlı Bulgular</h4>
+                        </div>
+                        <ul className="space-y-3">
+                          {summaryReport.findings.map((finding, index) => (
+                            <li key={index} className="flex gap-3 text-sm font-semibold text-emerald-900 leading-relaxed">
+                              <span className="mt-2 h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" />
+                              <span>{finding}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </section>
+
+                    <section className="border-t border-slate-200 pt-8 space-y-5">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-slate-900 flex items-center justify-center text-white">
+                          <BrainCircuit size={20} />
+                        </div>
+                        <div>
+                          <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">AI Yorumu</h3>
+                          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">/api/v1/insights çıktısı, özet rapordan ayrı gösterilir</p>
+                        </div>
+                      </div>
+
+                      {isInterpreting ? (
+                        <div className="flex items-center gap-4 rounded-2xl border border-slate-100 bg-slate-50 p-6">
+                          <Loader2 className="animate-spin text-slate-900" size={28} />
+                          <div>
+                            <p className="font-mono text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Processing Insights...</p>
+                            <p className="text-sm font-bold text-slate-600">Yapay zeka verileri analiz ediyor; özet rapor bu süreçten bağımsızdır.</p>
+                          </div>
+                        </div>
+                      ) : interpretation ? (
+                        <div className="prose prose-slate max-w-none prose-headings:uppercase prose-headings:tracking-widest prose-headings:text-slate-900 prose-p:text-slate-600 prose-p:leading-relaxed prose-strong:text-slate-900">
+                          <div className="whitespace-pre-wrap font-sans text-lg leading-relaxed text-slate-700">
+                            {interpretation.split('\n').map((line, i) => (
+                              <p key={i} className={cn(
+                                "mb-4",
+                                line.startsWith('#') ? "text-xl font-black text-slate-900 uppercase tracking-tighter mt-8 mb-2" : ""
+                              )}>
+                                {line.replace(/^#+\s*/, '')}
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="rounded-2xl border border-amber-100 bg-amber-50 p-6">
+                          <p className="text-sm font-bold text-amber-800">{interpretationError || 'AI yorumu henüz oluşturulmadı; deterministik özet rapor kullanılabilir.'}</p>
+                        </div>
+                      )}
+                    </section>
+                  </div>
                </div>
 
                {!isInterpreting && (
