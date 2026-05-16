@@ -2,6 +2,13 @@ import { motion } from 'motion/react';
 import { Sparkles } from 'lucide-react';
 import { cn } from '../../App';
 
+const viewModeLabels: Record<string, string> = {
+  rgb: 'Orijinal',
+  pseudo: 'Fizyolojik harita',
+  overlay: 'Üst üste görünüm',
+  isolated: 'Segmentasyon',
+};
+
 export function ImageViewer({ model }: { model: any }) {
   const { currentFrame, currentIndex, setCurrentIndex, data, chartData, viewMode, setViewMode } = model;
 
@@ -15,18 +22,18 @@ export function ImageViewer({ model }: { model: any }) {
                 key={mode}
                 onClick={() => setViewMode(mode)}
                 className={cn(
-                  'px-6 py-2 text-[10px] font-bold rounded-lg transition-all uppercase tracking-widest',
+                  'px-6 py-2 text-xs font-bold rounded-lg transition-all',
                   viewMode === mode ? 'bg-white text-slate-900 shadow-md ring-1 ring-slate-200' : 'text-slate-400 hover:text-slate-600'
                 )}
               >
-                {mode}
+                {viewModeLabels[mode]}
               </button>
             ))}
           </div>
           <button
             onClick={() => setViewMode('isolated')}
             className={cn(
-              'px-5 py-2 text-[10px] font-bold rounded-xl transition-all uppercase tracking-widest border flex items-center gap-2',
+              'px-5 py-2 text-xs font-bold rounded-xl transition-all border flex items-center gap-2',
               viewMode === 'isolated'
                 ? 'bg-emerald-600 text-white border-emerald-600 shadow-lg shadow-emerald-200'
                 : 'bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50'
@@ -38,7 +45,7 @@ export function ImageViewer({ model }: { model: any }) {
         </div>
         <div className="flex items-center gap-4">
           <div className="h-4 w-px bg-slate-200" />
-          <span className="text-[10px] font-mono font-bold text-slate-400">
+          <span className="text-xs font-mono font-bold text-slate-400">
             SCAN_ID: <span className="text-slate-900">{currentIndex + 1}</span> / {chartData.length}
           </span>
         </div>
@@ -84,12 +91,12 @@ export function ImageViewer({ model }: { model: any }) {
           <div className="absolute top-6 right-6 flex flex-col items-end gap-2 pointer-events-none">
             <div className="bg-slate-900/80 backdrop-blur-md px-3 py-1.5 rounded-lg border border-white/10 flex items-center gap-2">
               <div className={cn('w-1.5 h-1.5 rounded-full animate-pulse', viewMode === 'rgb' ? 'bg-white' : viewMode === 'pseudo' ? 'bg-rose-500' : 'bg-cyan-400')} />
-              <span className="text-[9px] font-bold text-white uppercase tracking-[0.2em]">{viewMode} ACTIVE</span>
+              <span className="text-xs font-bold text-white">{viewModeLabels[viewMode]} aktif</span>
             </div>
           </div>
           <div className="absolute bottom-6 right-6 pointer-events-none">
             <div className="bg-black/70 backdrop-blur-md px-3 py-2 rounded-lg border border-white/10">
-              <span className="text-[10px] font-mono font-bold text-white/90 uppercase tracking-wider">
+              <span className="text-sm font-semibold text-white/90">
                 Çekim Tarihi: {currentFrame.timestamp || '-'}
               </span>
             </div>
@@ -99,8 +106,8 @@ export function ImageViewer({ model }: { model: any }) {
 
       <div className="h-[70px] border-t border-slate-100 flex items-center px-8 gap-8 bg-white">
         <div className="flex flex-col gap-1 shrink-0">
-          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Sekans İlerlemesi</span>
-          <div className="text-[10px] font-mono font-bold">FRAME_{String(currentIndex + 1).padStart(2, '0')}</div>
+          <span className="text-xs font-bold text-slate-400">Sekans İlerlemesi</span>
+          <div className="text-xs font-mono font-bold">FRAME_{String(currentIndex + 1).padStart(2, '0')}</div>
         </div>
         <div className="relative flex-1">
           <input

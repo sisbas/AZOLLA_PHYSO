@@ -300,7 +300,7 @@ interface CompareMetricConfig {
 const COMPARE_METRICS: CompareMetricConfig[] = [
   { key: 'coverage_pct', label: 'Kapsama', unit: '%', digits: 1 },
   { key: 'early_stress_prob', label: 'Erken Stres Olasılığı', unit: '%', digits: 1, percentValue: true },
-  { key: 'frond_count', label: 'Frond Sayısı', unit: '', digits: 0 },
+  { key: 'frond_count', label: 'Yaprak sayısı', unit: '', digits: 0 },
   { key: 'rg_ratio', label: 'R/G Oranı', unit: '', digits: 3 },
   { key: 'chlorophyll_index', label: 'Klorofil İndeksi', unit: '', digits: 3 },
   { key: 'fresh_biomass_g_m2', label: 'Taze Biyokütle', unit: 'g/m²', digits: 1 },
@@ -391,14 +391,14 @@ interface QcMetricConfig {
 }
 
 const QC_METRICS: QcMetricConfig[] = [
-  { key: 'coverage_pct', label: 'Coverage', description: 'Segmentasyon kapsama oranı', type: 'percent', digits: 1, unit: '%' },
-  { key: 'otsu_valid', label: 'Otsu Valid', description: 'Otsu eşiği kabul edilebilir mi?', type: 'boolean' },
-  { key: 'plausible', label: 'Plausible', description: 'Maske/frond geometrisi makul mü?', type: 'boolean' },
-  { key: 'frond_count', label: 'Frond Count', description: 'Algılanan frond sayısı', type: 'number', digits: 0 },
-  { key: 'mean_size_px', label: 'Mean Size', description: 'Ortalama maske bileşeni boyutu', type: 'number', digits: 1, unit: 'px' },
-  { key: 'method', label: 'Method', description: 'Planlanan/raporlanan segmentasyon yöntemi', type: 'text' },
-  { key: 'methodUsed', label: 'Method Used', description: 'Optimizasyon sonrası kullanılan yöntem', type: 'text' },
-  { key: 'contrastScore', label: 'Contrast Score', description: 'Maske optimizasyon kontrast skoru', type: 'number', digits: 3 },
+  { key: 'coverage_pct', label: 'Kapsama', description: 'Segmentasyon kapsama oranı', type: 'percent', digits: 1, unit: '%' },
+  { key: 'otsu_valid', label: 'Otsu doğrulaması', description: 'Otsu eşiği kabul edilebilir mi?', type: 'boolean' },
+  { key: 'plausible', label: 'Geometri uygunluğu', description: 'Maske ve yaprak geometrisi makul mü?', type: 'boolean' },
+  { key: 'frond_count', label: 'Yaprak sayısı', description: 'Algılanan yaprak sayısı', type: 'number', digits: 0 },
+  { key: 'mean_size_px', label: 'Ortalama boyut', description: 'Ortalama maske bileşeni boyutu', type: 'number', digits: 1, unit: 'px' },
+  { key: 'method', label: 'Planlanan yöntem', description: 'Planlanan/raporlanan segmentasyon yöntemi', type: 'text' },
+  { key: 'methodUsed', label: 'Kullanılan yöntem', description: 'Optimizasyon sonrası kullanılan yöntem', type: 'text' },
+  { key: 'contrastScore', label: 'Kontrast skoru', description: 'Maske optimizasyon kontrast skoru', type: 'number', digits: 3 },
 ];
 
 const getQcRawValue = (frame: any, key: string) => frame?.metrics?.[key] ?? frame?.[key];
@@ -693,7 +693,7 @@ const CHART_METRICS: ChartMetricConfig[] = [
     reference: { value: 0.66, label: 'Stres eşiği %66', color: '#fb7185' },
   },
   { key: 'coverage', label: 'Kapsama', unit: '%', digits: 1, color: '#10b981', strokeDasharray: '6 4' },
-  { key: 'fronds', label: 'Frond Sayısı', unit: '', digits: 0, color: '#06b6d4', strokeDasharray: '8 4' },
+  { key: 'fronds', label: 'Yaprak sayısı', unit: '', digits: 0, color: '#06b6d4', strokeDasharray: '8 4' },
   { key: 'rg_ratio', label: 'R/G Oranı', unit: '', digits: 3, color: '#f97316' },
   { key: 'mean_g', label: 'Ortalama Yeşil', unit: '', digits: 1, color: '#22c55e' },
   { key: 'glcm_entropy', label: 'GLCM Entropi', unit: '', digits: 3, color: '#a855f7' },
@@ -849,11 +849,11 @@ const buildSummaryReport = (timeline: any[]): SummaryReport => {
   }
 
   if (latestFronds !== null && latestFronds > 1000) {
-    findings.push(`Frond yoğunluğu yüksek: son frond sayısı ${latestFronds.toFixed(0)}, ayrışma/üst üste binme kaynaklı yoğunluk riski izlenmeli.`);
+    findings.push(`Yaprak yoğunluğu yüksek: son yaprak sayısı ${latestFronds.toFixed(0)}, ayrışma/üst üste binme kaynaklı yoğunluk riski izlenmeli.`);
   }
 
   if (latestReliable === false || unreliableCount > 0) {
-    findings.push(`QC düşük: ${unreliableCount}/${sourceFrames.length} başarılı karede güvenilirlik veya frond plausibility uyarısı var.`);
+    findings.push(`QC düşük: ${unreliableCount}/${sourceFrames.length} başarılı karede güvenilirlik veya yaprak geometri uygunluğu uyarısı var.`);
   }
 
   if (biomassTrend.delta !== null && biomassTrend.delta < 0) {
@@ -873,7 +873,7 @@ const buildSummaryReport = (timeline: any[]): SummaryReport => {
       {
         label: 'Ortalama stres',
         value: avgStressValue === null ? 'Veri yok' : `${(avgStressValue * 100).toFixed(1)}%`,
-        detail: `${stressValues.length} başarılı kare üzerinden early_stress_prob ortalaması`,
+        detail: `${stressValues.length} başarılı kare üzerinden erken stres olasılığı ortalaması`,
       },
       {
         label: 'Maksimum stres',
@@ -886,9 +886,9 @@ const buildSummaryReport = (timeline: any[]): SummaryReport => {
         detail: coverageChange.first === null ? 'Veri yok' : `${coverageChange.first.toFixed(1)}% → ${coverageChange.last!.toFixed(1)}% (${formatPercentChange(coverageChange.percentChange)})`,
       },
       {
-        label: 'Frond değişimi',
+        label: 'Yaprak sayısı değişimi',
         value: formatSignedNumber(frondChange.delta, 0, ''),
-        detail: frondChange.first === null ? 'Veri yok' : `${frondChange.first.toFixed(0)} → ${frondChange.last!.toFixed(0)} frond (${formatPercentChange(frondChange.percentChange)})`,
+        detail: frondChange.first === null ? 'Veri yok' : `${frondChange.first.toFixed(0)} → ${frondChange.last!.toFixed(0)} yaprak (${formatPercentChange(frondChange.percentChange)})`,
       },
       {
         label: 'Klorofil trendi',
@@ -1046,7 +1046,7 @@ export default function Dashboard({ taskId }: DashboardProps) {
           <Loader2 className="animate-spin text-indigo-500" size={48} />
           <div className="absolute inset-0 m-auto w-2 h-2 bg-indigo-500 rounded-full animate-ping" />
         </div>
-        <p className="font-mono text-[10px] text-slate-400 uppercase tracking-[0.3em] animate-pulse">Fizyolojik Harita Oluşturuluyor...</p>
+        <p className="text-sm font-semibold text-slate-500 animate-pulse">Fizyolojik harita oluşturuluyor...</p>
       </div>
     );
   }
@@ -1058,7 +1058,7 @@ export default function Dashboard({ taskId }: DashboardProps) {
            <AlertCircle size={40} />
         </div>
         <div className="space-y-2">
-          <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Analiz Verisi Yüklenemedi</h2>
+          <h2 className="text-2xl font-black text-slate-900">Analiz Verisi Yüklenemedi</h2>
           <p className="text-sm text-slate-500 max-w-sm mx-auto font-medium">
             {error || 'Sunucu ile bağlantı kurulamadı veya veriler henüz işlenmedi. Lütfen sayfayı yenileyin veya tekrar yükleme yapın.'}
           </p>
@@ -1066,13 +1066,13 @@ export default function Dashboard({ taskId }: DashboardProps) {
         <div className="flex items-center gap-3">
           <button 
             onClick={() => window.location.reload()}
-            className="px-10 py-4 bg-slate-900 text-white rounded-2xl text-[11px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all shadow-2xl active:scale-95"
+            className="px-10 py-4 bg-slate-900 text-white rounded-2xl text-sm font-bold hover:bg-slate-800 transition-all shadow-2xl active:scale-95"
           >
             Yeniden Dene
           </button>
           <button 
             onClick={() => window.dispatchEvent(new CustomEvent('change-view', { detail: 'upload' }))}
-            className="px-10 py-4 bg-white border-2 border-slate-100 text-slate-500 rounded-2xl text-[11px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all active:scale-95"
+            className="px-10 py-4 bg-white border-2 border-slate-100 text-slate-500 rounded-2xl text-sm font-bold hover:bg-slate-50 transition-all active:scale-95"
           >
             Yükleme Ekranı
           </button>
@@ -1263,9 +1263,9 @@ export default function Dashboard({ taskId }: DashboardProps) {
   const frondQcMessage = currentFrondCount === null
     ? null
     : currentFrondCount < FROND_COUNT_QC_LOW
-      ? `Frond sayısı çok düşük (${currentFrondCount.toFixed(0)}); tekil nesne ayrımı ve örnek temsil gücü QC kontrolü gerektirir.`
+      ? `Yaprak sayısı çok düşük (${currentFrondCount.toFixed(0)}); tekil nesne ayrımı ve örnek temsil gücü QC kontrolü gerektirir.`
       : currentFrondCount > FROND_COUNT_QC_HIGH
-        ? `Frond sayısı çok yüksek (${currentFrondCount.toFixed(0)}); üst üste binme ve segment birleşmeleri nedeniyle sayım QC kontrolü gerektirir.`
+        ? `Yaprak sayısı çok yüksek (${currentFrondCount.toFixed(0)}); üst üste binme ve segment birleşmeleri nedeniyle sayım QC kontrolü gerektirir.`
         : null;
   const densitySegments = DENSITY_SEGMENTS.map((segment) => {
     const value = getDensityValue(currentPhenotyping, segment.key);
@@ -1334,7 +1334,7 @@ export default function Dashboard({ taskId }: DashboardProps) {
   const summaryReport = buildSummaryReport(data.timeline);
 
   const pieData = Object.keys(statusCounts).map(key => ({
-    name: key,
+    name: key === 'HEALTHY' ? 'Sağlıklı' : key === 'STRESSED' ? 'Stresli' : 'Bilinmiyor',
     value: statusCounts[key],
     color: key === 'HEALTHY' ? '#10b981' : key === 'STRESSED' ? '#ef4444' : '#f59e0b'
   }));
@@ -1380,7 +1380,7 @@ export default function Dashboard({ taskId }: DashboardProps) {
     currentPhenotyping,
     currentFrondCount,
     currentMeanFrondSize,
-    frondQcNote: frondQcMessage ?? 'Frond sayımı beklenen kalite aralığında görünüyor.',
+    frondQcNote: frondQcMessage ?? 'Yaprak sayımı beklenen kalite aralığında görünüyor.',
     densityRows: densitySegments,
     qcRows,
     qcHasDetailedData: hasQcFields,
