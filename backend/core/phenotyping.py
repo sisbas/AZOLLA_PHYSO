@@ -11,7 +11,7 @@ Korelasyon ≠ nedensellik. Bu skor erken uyarı indeksidir; biyokimyasal valida
 
 import numpy as np
 import cv2
-from typing import Dict, Any, Tuple, List
+from typing import Dict, Any, Tuple, List, Optional
 from dataclasses import dataclass
 from skimage.feature import graycomatrix, graycoprops
 from skimage.morphology import disk, binary_opening, binary_closing
@@ -54,8 +54,8 @@ class PhenotypeMetrics:
     biomass_calibration: Dict[str, Any]  # Kalibrasyon detayları
     
     # Büyüme parametreleri
-    growth_rate_percent_day: float
-    doubling_time_days: float
+    growth_rate_percent_day: Optional[float]
+    doubling_time_days: Optional[float]
     max_coverage_percent: float
     
     errors: List[Dict[str, Any]]
@@ -293,9 +293,33 @@ class PhenotypingModule:
             'calibration': calibration_info
         }
     
+    def _extract_previous_coverage(self, previous_results: Dict[str, Any] = None) -> Optional[float]:
+        """Read prior coverage from current phenotyping output or legacy metrics."""
+        if not previous_results:
+            return None
+
+        candidates = [
+            previous_results.get('phenotyping', {})
+                .get('segmentasyon', {})
+                .get('coverage_percent'),
+            previous_results.get('metrics', {}).get('coverage_pct'),
+        ]
+
+        for candidate in candidates:
+            if candidate is None:
+                continue
+            try:
+                coverage = float(candidate)
+            except (TypeError, ValueError):
+                continue
+            if np.isfinite(coverage):
+                return coverage
+
+        return None
+
     def calculate_growth_parameters(self, current_coverage: float, 
                                      previous_coverage: float = None,
-                                     time_diff_days: float = 1.0) -> Dict[str, float]:
+                                     time_diff_days: float = 1.0) -> Dict[str, Optional[float]]:
         """
         Büyüme Parametreleri Hesaplama
         
@@ -303,11 +327,19 @@ class PhenotypingModule:
         T_d = ln(2) / r
         """
         if previous_coverage is None or previous_coverage <= 0:
-            # Tek zaman noktası varsa varsayılan değerler
+            # Tek zaman noktası veya geçersiz önceki veri varsa büyüme hesabı yapılamaz.
             return {
-                'growth_rate_percent_day': 0.0,
-                'doubling_time_days': 999.0,
+                'growth_rate_percent_day': None,
+                'doubling_time_days': None,
                 'max_coverage_percent': current_coverage
+            }
+
+        if time_diff_days is None or time_diff_days <= 0:
+            # Aynı/ters tarihli frame'lerde günlük büyüme güvenilir değildir.
+            return {
+                'growth_rate_percent_day': None,
+                'doubling_time_days': None,
+                'max_coverage_percent': max(current_coverage, previous_coverage)
             }
         
         # Büyüme hızı
@@ -403,15 +435,16 @@ class PhenotypingModule:
             biomass_estimates = self.estimate_biomass(coverage_percent, chlorophyll_index)
             
             # 8. Büyüme parametreleri
-            prev_coverage = None
-            if previous_results and 'metrics' in previous_results:
-                prev_coverage = previous_results['metrics'].get('coverage_pct')
+            prev_coverage = self._extract_previous_coverage(previous_results)
             
             growth_params = self.calculate_growth_parameters(
                 coverage_percent, 
                 prev_coverage,
                 time_diff_days
             )
+
+            def round_optional(value, digits: int = 2):
+                return None if value is None else round(value, digits)
             
             return PhenotypeMetrics(
                 azolla_area_pixels=float(azolla_pixels),
@@ -441,8 +474,8 @@ class PhenotypingModule:
                 protein_content_percent=round(biomass_estimates['protein_content_percent'], 2),
                 biomass_calibration=biomass_estimates['calibration'],
                 
-                growth_rate_percent_day=round(growth_params['growth_rate_percent_day'], 2),
-                doubling_time_days=round(growth_params['doubling_time_days'], 2),
+                growth_rate_percent_day=round_optional(growth_params['growth_rate_percent_day'], 2),
+                doubling_time_days=round_optional(growth_params['doubling_time_days'], 2),
                 max_coverage_percent=round(growth_params['max_coverage_percent'], 2),
                 
                 errors=errors
@@ -488,8 +521,8 @@ class PhenotypingModule:
                     'reference': self.calibration_reference,
                     'note': 'Korelasyon ≠ nedensellik. Bu skor erken uyarı indeksidir; biyokimyasal validasyon gerektirir.'
                 },
-                growth_rate_percent_day=0.0,
-                doubling_time_days=0.0,
+                growth_rate_percent_day=None,
+                doubling_time_days=None,
                 max_coverage_percent=0.0,
                 errors=errors
             )
