@@ -65,6 +65,22 @@ const formatPhenotypingValue = (value: number | null, unit = '', digits = 1) => 
 const normalizePercent = (value: number | null) => value === null ? null : Math.max(0, Math.min(value / 100, 1));
 const normalizeChlorophyll = (value: number | null) => value === null ? null : Math.max(0, Math.min(value / 10, 1));
 
+const FROND_COUNT_QC_LOW = 10;
+const FROND_COUNT_QC_HIGH = 1000;
+
+type DensityMetricKey = 'density_low_percent' | 'density_medium_percent' | 'density_high_percent';
+
+const DENSITY_SEGMENTS: Array<{ key: DensityMetricKey; label: string; color: string; textColor: string }> = [
+  { key: 'density_low_percent', label: 'Düşük', color: 'bg-emerald-500', textColor: 'text-emerald-700' },
+  { key: 'density_medium_percent', label: 'Orta', color: 'bg-amber-400', textColor: 'text-amber-700' },
+  { key: 'density_high_percent', label: 'Yüksek', color: 'bg-rose-500', textColor: 'text-rose-700' },
+];
+
+const getDensityValue = (phenotyping: any, key: DensityMetricKey): number | null => {
+  const value = phenotyping?.[key] ?? phenotyping?.yogunluk_analizi?.[key] ?? phenotyping?.density_analysis?.[key];
+  return getNumericValue(value);
+};
+
 const PHENOTYPING_CARD_STYLES: Record<string, string> = {
   emerald: 'bg-emerald-50 text-emerald-700 border-emerald-100',
   cyan: 'bg-cyan-50 text-cyan-700 border-cyan-100',
@@ -615,7 +631,7 @@ const CHART_METRICS: ChartMetricConfig[] = [
   },
 ];
 
-const DEFAULT_CHART_METRICS: ChartMetricKey[] = ['prob', 'score', 'chlorophyll_index', 'fresh_biomass_g_m2'];
+const DEFAULT_CHART_METRICS: ChartMetricKey[] = ['prob', 'score', 'fronds', 'mean_size_px', 'chlorophyll_index', 'fresh_biomass_g_m2'];
 
 const getChartMetricValue = (frame: any, key: ChartMetricKey): number | null => {
   if (!frame) return null;
@@ -1102,6 +1118,25 @@ export default function Dashboard({ taskId }: DashboardProps) {
   });
 
   const currentPhenotyping = currentFrame.phenotyping;
+  const currentFrondCount = getNumericValue(currentFrame.metrics?.frond_count);
+  const currentMeanFrondSize = getNumericValue(currentFrame.metrics?.mean_size_px);
+  const frondQcMessage = currentFrondCount === null
+    ? null
+    : currentFrondCount < FROND_COUNT_QC_LOW
+      ? `Frond sayısı çok düşük (${currentFrondCount.toFixed(0)}); tekil nesne ayrımı ve örnek temsil gücü QC kontrolü gerektirir.`
+      : currentFrondCount > FROND_COUNT_QC_HIGH
+        ? `Frond sayısı çok yüksek (${currentFrondCount.toFixed(0)}); üst üste binme ve segment birleşmeleri nedeniyle sayım QC kontrolü gerektirir.`
+        : null;
+  const densitySegments = DENSITY_SEGMENTS.map((segment) => {
+    const value = getDensityValue(currentPhenotyping, segment.key);
+    return {
+      ...segment,
+      value,
+      width: value === null ? 0 : Math.max(0, Math.min(value, 100)),
+    };
+  });
+  const densityTotal = densitySegments.reduce((sum, segment) => sum + (segment.value ?? 0), 0);
+
   const qcRows = QC_METRICS.map((metric) => ({
     ...metric,
     value: getQcRawValue(currentFrame, metric.key),
@@ -1836,6 +1871,101 @@ export default function Dashboard({ taskId }: DashboardProps) {
                       </div>
                     );
                   })}
+                </div>
+              </div>
+
+              {/* Frond & Density Metrics */}
+              <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xl shadow-slate-200/30">
+                <div className="flex flex-col xl:flex-row xl:items-start justify-between gap-4 mb-6">
+                  <div>
+                    <h3 className="text-[11px] font-bold text-slate-900 uppercase tracking-[0.2em] mb-1">Frond / Yoğunluk Analizi</h3>
+                    <p className="text-[10px] text-slate-400">currentFrame.metrics içinden frond sayımı ve ortalama boyut; currentFrame.phenotyping içinden yoğunluk dağılımı</p>
+                  </div>
+                  <div className="px-3 py-1.5 rounded-full bg-cyan-50 text-cyan-700 border border-cyan-100 text-[9px] font-black uppercase tracking-widest">
+                    Count & Density QC
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 xl:grid-cols-[0.9fr_1.4fr] gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="rounded-2xl border border-cyan-100 bg-cyan-50 p-4 min-h-[128px] flex flex-col justify-between">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[8px] font-black uppercase tracking-widest text-cyan-700/70">Frond Sayısı</span>
+                        <Microscope size={15} className="text-cyan-600" />
+                      </div>
+                      <div>
+                        <span className="font-mono text-3xl font-black tracking-tighter text-slate-950">
+                          {currentFrondCount === null ? 'Veri yok' : currentFrondCount.toFixed(0)}
+                        </span>
+                        <p className="mt-1 text-[9px] font-bold uppercase tracking-widest text-cyan-700/70">metrics.frond_count</p>
+                      </div>
+                    </div>
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 min-h-[128px] flex flex-col justify-between">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[8px] font-black uppercase tracking-widest text-slate-500">Ortalama Frond Boyutu</span>
+                        <Maximize2 size={15} className="text-slate-500" />
+                      </div>
+                      <div>
+                        <span className="font-mono text-3xl font-black tracking-tighter text-slate-950">
+                          {currentMeanFrondSize === null ? 'Veri yok' : currentMeanFrondSize.toFixed(1)}
+                        </span>
+                        <span className="ml-1 text-xs font-black text-slate-400">px</span>
+                        <p className="mt-1 text-[9px] font-bold uppercase tracking-widest text-slate-400">metrics.mean_size_px</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4">
+                    <div className="flex items-start justify-between gap-4 mb-4">
+                      <div>
+                        <h4 className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-700">Yoğunluk Dağılımı</h4>
+                        <p className="mt-1 text-[10px] text-slate-400">Düşük / orta / yüksek yoğunluk yüzdeleri stacked bar olarak gösterilir.</p>
+                      </div>
+                      <span className="text-[9px] font-mono font-black text-slate-400">Σ {densityTotal.toFixed(1)}%</span>
+                    </div>
+
+                    <div className="h-8 w-full overflow-hidden rounded-full border border-white bg-white shadow-inner flex">
+                      {densitySegments.map((segment) => (
+                        <div
+                          key={segment.key}
+                          className={cn("h-full transition-all", segment.color, segment.width <= 0 && "hidden")}
+                          style={{ width: `${segment.width}%` }}
+                          title={`${segment.label}: ${segment.value === null ? 'Veri yok' : `${segment.value.toFixed(1)}%`}`}
+                        />
+                      ))}
+                      {densityTotal <= 0 && (
+                        <div className="flex h-full w-full items-center justify-center text-[9px] font-black uppercase tracking-widest text-slate-300">Yoğunluk verisi yok</div>
+                      )}
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-3 gap-2">
+                      {densitySegments.map((segment) => (
+                        <div key={segment.key} className="rounded-xl border border-white bg-white p-3 shadow-sm">
+                          <div className="mb-2 flex items-center gap-2">
+                            <span className={cn("h-2 w-2 rounded-full", segment.color)} />
+                            <span className={cn("text-[8px] font-black uppercase tracking-widest", segment.textColor)}>{segment.label}</span>
+                          </div>
+                          <span className="font-mono text-lg font-black tracking-tighter text-slate-950">
+                            {segment.value === null ? '—' : `${segment.value.toFixed(1)}%`}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {frondQcMessage && (
+                  <div className="mt-5 flex items-start gap-3 rounded-2xl border border-amber-100 bg-amber-50 p-4">
+                    <AlertCircle size={16} className="mt-0.5 shrink-0 text-amber-600" />
+                    <p className="text-[10px] font-bold leading-relaxed text-amber-800">{frondQcMessage}</p>
+                  </div>
+                )}
+
+                <div className="mt-4 flex items-start gap-3 rounded-2xl border border-cyan-100 bg-cyan-50 p-4">
+                  <AlertCircle size={16} className="mt-0.5 shrink-0 text-cyan-600" />
+                  <p className="text-[10px] font-bold leading-relaxed text-cyan-900">
+                    Yüksek yoğunlukta tek tek frond sayımı güvenilirliği düşebilir; yoğunluk dağılımı ve QC uyarıları sayım metrikleriyle birlikte değerlendirilmelidir.
+                  </p>
                 </div>
               </div>
 
