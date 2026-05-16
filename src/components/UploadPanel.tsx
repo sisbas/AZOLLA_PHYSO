@@ -7,6 +7,44 @@ interface UploadPanelProps {
   onComplete: (taskId: string) => void;
 }
 
+const toIsoTimestamp = (date: Date) => date.toISOString();
+
+const timestampFromFilename = (filename: string): string | null => {
+  const patterns: RegExp[] = [
+    /(20\d{2})[-_\. ]?(0[1-9]|1[0-2])[-_\. ]?([0-2]\d|3[01])(?:[Tt_\- ]?([01]\d|2[0-3])[-_\. ]?([0-5]\d)(?:[-_\. ]?([0-5]\d))?)?/,
+    /([0-2]\d|3[01])[-_\. ](0[1-9]|1[0-2])[-_\. ](20\d{2})(?:[Tt_\- ]?([01]\d|2[0-3])[-_\. ]?([0-5]\d)(?:[-_\. ]?([0-5]\d))?)?/,
+  ];
+
+  for (const [index, pattern] of patterns.entries()) {
+    const match = filename.match(pattern);
+    if (!match) continue;
+
+    const [, first, second, third, hour = '00', minute = '00', secondPart = '00'] = match;
+    const year = index === 0 ? first : third;
+    const month = index === 0 ? second : second;
+    const day = index === 0 ? third : first;
+    const date = new Date(`${year}-${month}-${day}T${hour}:${minute}:${secondPart}.000Z`);
+
+    if (!Number.isNaN(date.getTime())) {
+      return toIsoTimestamp(date);
+    }
+  }
+
+  return null;
+};
+
+const timestampForFile = (file: File) => {
+  const filenameTimestamp = timestampFromFilename(file.name);
+  if (filenameTimestamp) return filenameTimestamp;
+
+  const lastModified = new Date(file.lastModified);
+  if (!Number.isNaN(lastModified.getTime())) {
+    return toIsoTimestamp(lastModified);
+  }
+
+  return toIsoTimestamp(new Date(0));
+};
+
 export default function UploadPanel({ onComplete }: UploadPanelProps) {
   const [files, setFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
@@ -35,7 +73,10 @@ export default function UploadPanel({ onComplete }: UploadPanelProps) {
     }
     
     const formData = new FormData();
-    files.forEach(f => formData.append('images', f));
+    files.forEach(f => {
+      formData.append('images', f);
+      formData.append('timestamps', timestampForFile(f));
+    });
     formData.append('experiment_id', `EXP-${Date.now()}`);
 
     try {

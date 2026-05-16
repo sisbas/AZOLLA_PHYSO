@@ -36,6 +36,69 @@ interface Task {
 
 const tasks: Record<string, Task> = {};
 
+const toIsoTimestamp = (date: Date) => date.toISOString();
+
+const timestampFromFilename = (filename?: string): string | undefined => {
+  if (!filename) return undefined;
+
+  const patterns: Array<{ pattern: RegExp; order: [number, number, number] }> = [
+    {
+      pattern: /(20\d{2})[-_\. ]?(0[1-9]|1[0-2])[-_\. ]?([0-2]\d|3[01])(?:[Tt_\- ]?([01]\d|2[0-3])[-_\. ]?([0-5]\d)(?:[-_\. ]?([0-5]\d))?)?/,
+      order: [1, 2, 3],
+    },
+    {
+      pattern: /([0-2]\d|3[01])[-_\. ](0[1-9]|1[0-2])[-_\. ](20\d{2})(?:[Tt_\- ]?([01]\d|2[0-3])[-_\. ]?([0-5]\d)(?:[-_\. ]?([0-5]\d))?)?/,
+      order: [3, 2, 1],
+    },
+  ];
+
+  for (const { pattern, order } of patterns) {
+    const match = filename.match(pattern);
+    if (!match) continue;
+
+    const [yearIndex, monthIndex, dayIndex] = order;
+    const hour = match[4] || "00";
+    const minute = match[5] || "00";
+    const second = match[6] || "00";
+    const date = new Date(`${match[yearIndex]}-${match[monthIndex]}-${match[dayIndex]}T${hour}:${minute}:${second}.000Z`);
+
+    if (!Number.isNaN(date.getTime())) {
+      return toIsoTimestamp(date);
+    }
+  }
+
+  return undefined;
+};
+
+const normalizeTimestamp = (timestamp?: string): string | undefined => {
+  const candidate = timestamp?.trim();
+  if (!candidate) return undefined;
+
+  const date = new Date(candidate);
+  if (!Number.isNaN(date.getTime())) {
+    return toIsoTimestamp(date);
+  }
+
+  return candidate;
+};
+
+const deterministicTimestampForIndex = (index: number) =>
+  toIsoTimestamp(new Date(Date.UTC(2000, 0, 1, 0, 0, index)));
+
+const resolveSeriesTimestamps = (files: Express.Multer.File[], submitted: unknown): string[] => {
+  const submittedTimestamps = Array.isArray(submitted)
+    ? submitted.map(String)
+    : typeof submitted === "string"
+      ? [submitted]
+      : [];
+
+  return files.map((file, index) => (
+    normalizeTimestamp(submittedTimestamps[index])
+    || timestampFromFilename(file.originalname)
+    || deterministicTimestampForIndex(index)
+  ));
+};
+
 // Logger helper
 const logger = {
   info: (msg: string) => console.log(`[INFO] ${new Date().toISOString()} - ${msg}`),
@@ -97,7 +160,8 @@ async function startServer() {
       tasks[taskId] = { id: taskId, status: "processing", progress: 0, stage: "queued" };
 
       // Run pipeline in background
-      processImages(taskId, files).catch((err) => {
+      const timestamps = resolveSeriesTimestamps(files, req.body.timestamps);
+      processImages(taskId, files, timestamps, experimentId).catch((err) => {
         console.error("Pipeline Error:", err);
         tasks[taskId].status = "failed";
     tasks[taskId].stage = "failed";
@@ -237,7 +301,7 @@ async function startServer() {
       const proteinContent = 25 + 10 * chlNorm;
       
       res.json({
-        timestamp: pythonRes.timestamp,
+        timestamp: normalizeTimestamp(pythonRes.timestamp) || timestampFromFilename(file.originalname) || deterministicTimestampForIndex(0),
         segmentasyon: {
           azolla_area_pixels: azollaPixels,
           azolla_area_m2: Math.round(areaM2 * 1000) / 1000,
@@ -442,7 +506,7 @@ async function runPythonPipeline(imageBuffer: Buffer, filename: string): Promise
   });
 }
 
-async function processImages(taskId: string, files: Express.Multer.File[]) {
+async function processImages(taskId: string, files: Express.Multer.File[], timestamps: string[], experimentId: string) {
   const results = [];
   const total = files.length;
   let processingErrors = [];
@@ -461,7 +525,7 @@ async function processImages(taskId: string, files: Express.Multer.File[]) {
       
       results.push({
         filename: file.originalname,
-        timestamp: pythonRes.timestamp,
+        timestamp: timestamps[i] || normalizeTimestamp(pythonRes.timestamp) || deterministicTimestampForIndex(i),
         status: "optimized",
         method: "AzollaProcessor-v1",
         errors: [],
@@ -498,7 +562,7 @@ async function processImages(taskId: string, files: Express.Multer.File[]) {
         filename: file.originalname,
         error: err.message,
         stack: process.env.NODE_ENV === 'development' ? err.stack : undefined,
-        timestamp: new Date().toISOString()
+        timestamp: timestamps[i] || timestampFromFilename(file.originalname) || deterministicTimestampForIndex(i)
       };
       
       processingErrors.push(errorInfo);
@@ -508,7 +572,7 @@ async function processImages(taskId: string, files: Express.Multer.File[]) {
         filename: file.originalname,
         status: "failed",
         error: errorInfo,
-        timestamp: new Date().toISOString()
+        timestamp: timestamps[i] || timestampFromFilename(file.originalname) || deterministicTimestampForIndex(i)
       });
     }
 
@@ -522,7 +586,7 @@ async function processImages(taskId: string, files: Express.Multer.File[]) {
     tasks[taskId].error = `Hiçbir görüntü başarıyla işlenemedi (${total} dosya başarısız).`;
     tasks[taskId].current_file = undefined;
     tasks[taskId].results = {
-      experiment_id: uuidv4(),
+      experiment_id: experimentId,
       timeline: results,
       errors: processingErrors,
       summary: {
@@ -537,7 +601,7 @@ async function processImages(taskId: string, files: Express.Multer.File[]) {
     const failedCount = results.filter(r => r.status === "failed").length;
     
     tasks[taskId].results = {
-      experiment_id: uuidv4(),
+      experiment_id: experimentId,
       timeline: results,
       errors: processingErrors.length > 0 ? processingErrors : undefined,
       summary: {
