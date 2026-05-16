@@ -296,6 +296,70 @@ const getNumericValue = (value: unknown): number | null => {
   return null;
 };
 
+type DecisionContributionKey = 'rg_ratio' | 'mean_g' | 'glcm_entropy';
+
+type DecisionWeights = Record<'rg_ratio_pct' | 'mean_g_pct' | 'glcm_entropy_pct', number>;
+
+interface DecisionContributionConfig {
+  key: DecisionContributionKey;
+  weightKey: keyof DecisionWeights;
+  label: string;
+  description: string;
+  color: string;
+  digits: number;
+  getSignal: (value: number | null) => number | null;
+}
+
+const DEFAULT_DECISION_WEIGHTS: DecisionWeights = {
+  rg_ratio_pct: 0.4,
+  mean_g_pct: 0.3,
+  glcm_entropy_pct: 0.2,
+};
+
+const DECISION_CONTRIBUTIONS: DecisionContributionConfig[] = [
+  {
+    key: 'rg_ratio',
+    weightKey: 'rg_ratio_pct',
+    label: 'R/G oranı',
+    description: 'R/G artışı',
+    color: 'bg-orange-500',
+    digits: 3,
+    getSignal: (value) => value,
+  },
+  {
+    key: 'mean_g',
+    weightKey: 'mean_g_pct',
+    label: 'Yeşil kanal',
+    description: 'Yeşil kanal düşüşü',
+    color: 'bg-emerald-500',
+    digits: 3,
+    getSignal: (value) => value === null ? null : 1 - value,
+  },
+  {
+    key: 'glcm_entropy',
+    weightKey: 'glcm_entropy_pct',
+    label: 'Doku entropisi',
+    description: 'Doku entropisi artışı',
+    color: 'bg-violet-500',
+    digits: 3,
+    getSignal: (value) => value,
+  },
+];
+
+const getDecisionWeights = (data: any): { weights: DecisionWeights; fromApi: boolean } => {
+  const apiWeights = data?.metadata?.decision?.early_weights;
+  const hasApiWeights = DECISION_CONTRIBUTIONS.every(({ weightKey }) => typeof apiWeights?.[weightKey] === 'number');
+
+  return {
+    weights: hasApiWeights ? apiWeights : DEFAULT_DECISION_WEIGHTS,
+    fromApi: hasApiWeights,
+  };
+};
+
+const formatDecisionValue = (value: number | null, digits = 3) => (
+  value === null ? 'Veri yok' : value.toFixed(digits)
+);
+
 const getStressMetricValue = (frame: any, config: StressMetricConfig): number | null => {
   if (config.source === 'phenotyping') {
     if (config.key === 'stress_browning_percent' || config.key === 'stress_yellowing_percent') {
@@ -801,6 +865,24 @@ export default function Dashboard({ taskId }: DashboardProps) {
   const currentFrame = data.timeline[currentIndex] || data.timeline[0];
   
   if (!currentFrame) return null;
+
+  const { weights: decisionWeights, fromApi: decisionWeightsFromApi } = getDecisionWeights(data);
+  const decisionProbability = getNumericValue(currentFrame.metrics?.early_stress_prob ?? currentFrame.decision?.early_stress_prob);
+  const decisionContributionRows = DECISION_CONTRIBUTIONS.map((contribution) => {
+    const rawValue = getNumericValue(currentFrame.metrics?.[contribution.key]);
+    const signalValue = contribution.getSignal(rawValue);
+    const weight = decisionWeights[contribution.weightKey];
+    const contributionValue = signalValue === null ? null : signalValue * weight;
+
+    return {
+      ...contribution,
+      rawValue,
+      signalValue,
+      weight,
+      contributionValue,
+      barWidth: contributionValue === null ? 0 : Math.max(0, Math.min(contributionValue, 1)) * 100,
+    };
+  });
   
   const handleDownload = () => {
     if (!currentFrame) return;
@@ -1247,27 +1329,71 @@ export default function Dashboard({ taskId }: DashboardProps) {
                      </div>
                      <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] mb-6">Physio_Logic Core</h3>
                      
-                     <div className="flex flex-col gap-2 mb-8">
-                        <div className="flex items-center gap-2">
+                     <div className="flex flex-col gap-2 mb-6">
+                        <div className="flex items-center justify-between gap-2">
                           <span className={cn(
                             "px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest",
-                            currentFrame.decision.status === 'HEALTHY' ? "bg-emerald-50 text-emerald-600 border border-emerald-100" : "bg-rose-50 text-rose-600 border border-rose-100"
+                            currentFrame.decision?.status === 'HEALTHY' ? "bg-emerald-50 text-emerald-600 border border-emerald-100" : "bg-rose-50 text-rose-600 border border-rose-100"
                           )}>
-                            {currentFrame.decision.status}
+                            {currentFrame.decision?.status ?? 'UNKNOWN'}
                           </span>
-                          <span className="text-[9px] font-bold text-slate-300">Confidence_Score</span>
+                          <span className="text-[9px] font-bold text-slate-300">early_stress_prob</span>
                         </div>
                         <div className="flex items-baseline gap-2">
                           <span className="text-5xl font-black font-mono tracking-tighter text-slate-900">
-                            {Math.round(currentFrame.metrics.early_stress_prob * 100)}<span className="text-2xl text-slate-300">%</span>
+                            {decisionProbability === null ? '—' : Math.round(decisionProbability * 100)}<span className="text-2xl text-slate-300">%</span>
                           </span>
+                          <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Karar olasılığı</span>
                         </div>
                      </div>
 
                      <div className="p-4 bg-slate-50 border border-slate-100 rounded-xl">
+                        <div className="text-[8px] font-bold text-slate-400 uppercase mb-2 tracking-widest">Rationale</div>
                         <p className="text-[11px] leading-relaxed text-slate-600 italic">
-                          {currentFrame.decision.rationale}
+                          {currentFrame.decision?.rationale ?? 'Karar gerekçesi bulunamadı.'}
                         </p>
+                     </div>
+
+                     <div className="mt-6 space-y-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <div className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Katkı Ayrışımı</div>
+                            <p className="text-[9px] text-slate-400 mt-1">
+                              {decisionWeightsFromApi ? 'Backend decision.early_weights ağırlıkları kullanılıyor.' : 'Yaklaşık katkı: backend ağırlıkları API yanıtında bulunamadı.'}
+                            </p>
+                          </div>
+                          <span className={cn(
+                            "px-2 py-1 rounded-lg border text-[8px] font-bold uppercase tracking-wider",
+                            decisionWeightsFromApi ? "bg-emerald-50 text-emerald-700 border-emerald-100" : "bg-amber-50 text-amber-700 border-amber-100"
+                          )}>
+                            {decisionWeightsFromApi ? 'API ağırlığı' : 'Yaklaşık katkı'}
+                          </span>
+                        </div>
+
+                        {decisionContributionRows.map((row) => (
+                          <div key={row.key} className="space-y-1.5">
+                            <div className="flex items-center justify-between gap-3 text-[10px]">
+                              <div>
+                                <span className="font-bold text-slate-700">{row.label}</span>
+                                <span className="text-slate-400"> · {row.description}</span>
+                              </div>
+                              <div className="font-mono text-slate-500 text-right">
+                                <span>{formatDecisionValue(row.contributionValue, 3)}</span>
+                                <span className="text-slate-300"> / w:{row.weight.toFixed(2)}</span>
+                              </div>
+                            </div>
+                            <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                              <div
+                                className={cn("h-full rounded-full", row.color)}
+                                style={{ width: `${row.barWidth}%` }}
+                              />
+                            </div>
+                            <div className="flex justify-between text-[8px] text-slate-400 font-mono">
+                              <span>değer: {formatDecisionValue(row.rawValue, row.digits)}</span>
+                              <span>sinyal: {formatDecisionValue(row.signalValue, 3)}</span>
+                            </div>
+                          </div>
+                        ))}
                      </div>
                      
                      <div className="grid grid-cols-2 gap-3 mt-8">
@@ -1279,6 +1405,13 @@ export default function Dashboard({ taskId }: DashboardProps) {
                           <div className="text-[8px] font-bold text-slate-400 uppercase mb-1 tracking-widest">Area_Cov</div>
                           <div className="text-lg font-bold font-mono text-slate-900">{currentFrame.metrics.coverage_pct.toFixed(1)}<span className="text-xs text-slate-300">%</span></div>
                         </div>
+                     </div>
+
+                     <div className="mt-5 flex items-start gap-2 p-3 bg-amber-50 border border-amber-100 rounded-xl">
+                        <AlertCircle size={14} className="text-amber-600 mt-0.5 shrink-0" />
+                        <p className="text-[10px] leading-relaxed font-semibold text-amber-800">
+                          Korelasyon ≠ nedensellik; biyokimyasal validasyon gerekir.
+                        </p>
                      </div>
                   </motion.div>
 

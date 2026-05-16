@@ -172,7 +172,18 @@ class AzollaPipeline:
             for i, res in enumerate(results_list):
                 decision_data = decision_df.iloc[i].to_dict()
                 res['decision'] = {k: v for k, v in decision_data.items() if k != 'errors'}
+                # Keep the decision probability available under metrics as well so
+                # existing dashboard metric renderers and comparison charts can
+                # consume a single metric namespace.
+                if 'early_stress_prob' in decision_data:
+                    res['metrics']['early_stress_prob'] = decision_data['early_stress_prob']
                 res['errors'].extend(decision_data.get('errors', []))
+
+            metadata = self.val.generate_metadata(hash(str(self.config)))
+            metadata['decision'] = {
+                "early_weights": self.config.get('decision', {}).get('early_weights', {}),
+                "prob_threshold": self.config.get('decision', {}).get('prob_threshold')
+            }
             
             self.logger.info(f"Series processing completed for experiment {experiment_id}")
             
@@ -180,7 +191,7 @@ class AzollaPipeline:
                 "experiment_id": experiment_id,
                 "timeline": results_list,
                 "validation": val_report,
-                "metadata": self.val.generate_metadata(hash(str(self.config)))
+                "metadata": metadata
             }
         except Exception as e:
             self.logger.error(f"Error in series processing for {experiment_id}: {str(e)}", exc_info=True)
