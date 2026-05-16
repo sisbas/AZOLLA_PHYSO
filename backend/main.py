@@ -4,13 +4,13 @@ import shutil
 import os
 import cv2
 import numpy as np
-from fastapi import FastAPI, UploadFile, File, BackgroundTasks, HTTPException
+from fastapi import FastAPI, UploadFile, File, BackgroundTasks, HTTPException, Form
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 from uuid import uuid4
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from backend.pipeline_runner import AzollaPipeline
 from backend.phenotyping_service import AzollaPhenotypingService
 from backend.logger import get_logger
@@ -53,6 +53,74 @@ class TaskStatus(BaseModel):
 @app.get("/api/v1/health")
 def health():
     return {"status": "ready", "pipeline": "azolla_v1", "gpu": False}
+
+def _iso_timestamp(value: datetime) -> str:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+def _timestamp_from_filename(filename: Optional[str]) -> Optional[str]:
+    if not filename:
+        return None
+
+    import re
+    patterns = [
+        (re.compile(r"(20\d{2})[-_\. ]?(0[1-9]|1[0-2])[-_\. ]?([0-2]\d|3[01])(?:[Tt_\- ]?([01]\d|2[0-3])[-_\. ]?([0-5]\d)(?:[-_\. ]?([0-5]\d))?)?"), (1, 2, 3)),
+        (re.compile(r"([0-2]\d|3[01])[-_\. ](0[1-9]|1[0-2])[-_\. ](20\d{2})(?:[Tt_\- ]?([01]\d|2[0-3])[-_\. ]?([0-5]\d)(?:[-_\. ]?([0-5]\d))?)?"), (3, 2, 1)),
+    ]
+
+    for pattern, (year_idx, month_idx, day_idx) in patterns:
+        match = pattern.search(filename)
+        if not match:
+            continue
+
+        hour = match.group(4) or "00"
+        minute = match.group(5) or "00"
+        second = match.group(6) or "00"
+        try:
+            parsed = datetime(
+                int(match.group(year_idx)),
+                int(match.group(month_idx)),
+                int(match.group(day_idx)),
+                int(hour),
+                int(minute),
+                int(second),
+                tzinfo=timezone.utc,
+            )
+            return _iso_timestamp(parsed)
+        except ValueError:
+            continue
+
+    return None
+
+def _normalize_timestamp(timestamp: Optional[str]) -> Optional[str]:
+    if not timestamp:
+        return None
+
+    candidate = timestamp.strip()
+    if not candidate:
+        return None
+
+    try:
+        parsed = datetime.fromisoformat(candidate.replace("Z", "+00:00"))
+        return _iso_timestamp(parsed)
+    except ValueError:
+        return candidate
+
+def _resolve_series_timestamps(images: List[UploadFile], timestamps: Optional[List[str]]) -> List[str]:
+    resolved = []
+    deterministic_base = datetime(2000, 1, 1, tzinfo=timezone.utc)
+
+    for index, img_file in enumerate(images):
+        provided = timestamps[index] if timestamps and index < len(timestamps) else None
+        timestamp = _normalize_timestamp(provided) or _timestamp_from_filename(img_file.filename)
+
+        if not timestamp:
+            timestamp = _iso_timestamp(deterministic_base + timedelta(seconds=index))
+
+        resolved.append(timestamp)
+
+    return resolved
 
 async def process_series_task(task_id: str, experiment_id: str, images: List[UploadFile], timestamps: List[str]):
     try:
@@ -107,17 +175,18 @@ async def process_series_task(task_id: str, experiment_id: str, images: List[Upl
 async def predict_series(
     background_tasks: BackgroundTasks, 
     images: List[UploadFile] = File(...), 
-    timestamps: List[str] = File(...),
-    experiment_id: Optional[str] = None
+    timestamps: Optional[List[str]] = Form(None),
+    experiment_id: Optional[str] = Form(None)
 ):
     try:
         task_id = str(uuid4())
         if not experiment_id:
             experiment_id = f"EXP-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
         
+        resolved_timestamps = _resolve_series_timestamps(images, timestamps)
         logger.info(f"Creating new task {task_id} for experiment {experiment_id} with {len(images)} images")
         tasks[task_id] = {"status": "queued", "progress": 0}
-        background_tasks.add_task(process_series_task, task_id, experiment_id, images, timestamps)
+        background_tasks.add_task(process_series_task, task_id, experiment_id, images, resolved_timestamps)
         
         return {"task_id": task_id, "experiment_id": experiment_id}
     except Exception as e:
