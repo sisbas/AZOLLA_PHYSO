@@ -376,6 +376,111 @@ const formatDecisionValue = (value: number | null, digits = 3) => (
   value === null ? 'Veri yok' : value.toFixed(digits)
 );
 
+type QcLevel = 'reliable' | 'warning' | 'low';
+
+interface QcMetricConfig {
+  key: string;
+  label: string;
+  description: string;
+  type?: 'percent' | 'boolean' | 'number' | 'text';
+  digits?: number;
+  unit?: string;
+}
+
+const QC_METRICS: QcMetricConfig[] = [
+  { key: 'coverage_pct', label: 'Coverage', description: 'Segmentasyon kapsama oranı', type: 'percent', digits: 1, unit: '%' },
+  { key: 'otsu_valid', label: 'Otsu Valid', description: 'Otsu eşiği kabul edilebilir mi?', type: 'boolean' },
+  { key: 'plausible', label: 'Plausible', description: 'Maske/frond geometrisi makul mü?', type: 'boolean' },
+  { key: 'frond_count', label: 'Frond Count', description: 'Algılanan frond sayısı', type: 'number', digits: 0 },
+  { key: 'mean_size_px', label: 'Mean Size', description: 'Ortalama maske bileşeni boyutu', type: 'number', digits: 1, unit: 'px' },
+  { key: 'method', label: 'Method', description: 'Planlanan/raporlanan segmentasyon yöntemi', type: 'text' },
+  { key: 'methodUsed', label: 'Method Used', description: 'Optimizasyon sonrası kullanılan yöntem', type: 'text' },
+  { key: 'contrastScore', label: 'Contrast Score', description: 'Maske optimizasyon kontrast skoru', type: 'number', digits: 3 },
+];
+
+const getQcRawValue = (frame: any, key: string) => frame?.metrics?.[key] ?? frame?.[key];
+
+const hasQcValue = (value: unknown) => value !== undefined && value !== null && value !== '';
+
+const formatQcValue = (value: unknown, config: QcMetricConfig) => {
+  if (!hasQcValue(value)) return 'Veri yok';
+
+  if (config.type === 'boolean') {
+    if (typeof value === 'boolean') return value ? 'Evet' : 'Hayır';
+    return String(value);
+  }
+
+  if (config.type === 'number' || config.type === 'percent') {
+    const numericValue = getNumericValue(value);
+    if (numericValue === null) return String(value);
+    return `${numericValue.toFixed(config.digits ?? 1)}${config.unit ?? ''}`;
+  }
+
+  return String(value);
+};
+
+const groupErrorsBySeverity = (errors: any[] = []) => errors.reduce((groups: Record<string, any[]>, error) => {
+  const severity = String(error?.severity ?? 'unknown').toLowerCase();
+  groups[severity] = [...(groups[severity] ?? []), error];
+  return groups;
+}, {});
+
+const getQcLevelSummary = (frame: any): { level: QcLevel; label: string; detail: string } => {
+  const status = String(frame?.status ?? '').toLowerCase();
+  const errors = Array.isArray(frame?.errors) ? frame.errors : [];
+  const hasCriticalError = errors.some((error: any) => ['critical', 'error'].includes(String(error?.severity ?? '').toLowerCase()));
+  const hasWarning = errors.some((error: any) => ['warning', 'warn'].includes(String(error?.severity ?? '').toLowerCase()));
+  const otsuValid = getQcRawValue(frame, 'otsu_valid');
+  const plausible = getQcRawValue(frame, 'plausible');
+  const coverage = getNumericValue(getQcRawValue(frame, 'coverage_pct'));
+  const frondCount = getNumericValue(getQcRawValue(frame, 'frond_count'));
+  const fallbackActive = status.includes('fallback') || status.includes('failed') || status.includes('degraded');
+
+  if (status === 'failed' || hasCriticalError || otsuValid === false || plausible === false || coverage === 0 || frondCount === 0) {
+    return {
+      level: 'low',
+      label: 'Düşük Güven',
+      detail: 'Kritik hata, geçersiz eşik veya makul olmayan maske sinyali var.',
+    };
+  }
+
+  if (fallbackActive || hasWarning || status.includes('optimized') || coverage === null || frondCount === null) {
+    return {
+      level: 'warning',
+      label: 'Dikkat',
+      detail: 'Çıktı kullanılabilir, ancak fallback/optimizasyon veya eksik QC alanı nedeniyle kontrol önerilir.',
+    };
+  }
+
+  return {
+    level: 'reliable',
+    label: 'Güvenilir',
+    detail: 'Segmentasyon ve maske optimizasyon sinyalleri tutarlı görünüyor.',
+  };
+};
+
+const getQcStatusNotes = (frame: any) => {
+  const status = String(frame?.status ?? 'unknown');
+  const normalizedStatus = status.toLowerCase();
+  const method = getQcRawValue(frame, 'method');
+  const methodUsed = getQcRawValue(frame, 'methodUsed');
+  const notes = [`Status: ${status}`];
+
+  if (normalizedStatus.includes('fallback') || normalizedStatus.includes('failed') || normalizedStatus.includes('degraded')) {
+    notes.push('Fallback/kesinti durumu bildirildi.');
+  }
+
+  if (normalizedStatus.includes('optimized')) {
+    notes.push('Maske optimizasyonu aktif/başarılı görünüyor.');
+  }
+
+  if (hasQcValue(method) && hasQcValue(methodUsed) && method !== methodUsed) {
+    notes.push(`Yöntem değişti: ${method} → ${methodUsed}`);
+  }
+
+  return notes;
+};
+
 const getStressMetricValue = (frame: any, config: StressMetricConfig): number | null => {
   if (config.source === 'phenotyping') {
     if (config.key === 'stress_browning_percent' || config.key === 'stress_yellowing_percent') {
@@ -1031,6 +1136,18 @@ export default function Dashboard({ taskId }: DashboardProps) {
     };
   });
   const densityTotal = densitySegments.reduce((sum, segment) => sum + (segment.value ?? 0), 0);
+
+  const qcRows = QC_METRICS.map((metric) => ({
+    ...metric,
+    value: getQcRawValue(currentFrame, metric.key),
+  }));
+  const hasQcFields = qcRows.some((metric) => hasQcValue(metric.value))
+    || hasQcValue(currentFrame.status)
+    || (Array.isArray(currentFrame.errors) && currentFrame.errors.length > 0);
+  const qcSummary = getQcLevelSummary(currentFrame);
+  const qcStatusNotes = getQcStatusNotes(currentFrame);
+  const errorsBySeverity = groupErrorsBySeverity(Array.isArray(currentFrame.errors) ? currentFrame.errors : []);
+  const errorSeverityEntries = Object.entries(errorsBySeverity) as Array<[string, any[]]>;
   const stressBreakdownMetrics = STRESS_METRIC_CONFIG.map((metric) => {
     const value = getStressMetricValue(currentFrame, metric);
     const risk = getStressRisk(value, metric);
@@ -1447,6 +1564,118 @@ export default function Dashboard({ taskId }: DashboardProps) {
                           Korelasyon ≠ nedensellik; biyokimyasal validasyon gerekir.
                         </p>
                      </div>
+                  </motion.div>
+
+                  {/* QC / Reliability Panel */}
+                  <motion.div
+                    initial={{ scale: 0.95, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xl shadow-slate-200/40 relative overflow-hidden"
+                  >
+                    <div className="absolute top-0 right-0 p-4 opacity-[0.04]">
+                      <ListChecks size={86} />
+                    </div>
+                    <div className="relative flex items-start justify-between gap-3 mb-5">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <ListChecks size={14} className="text-slate-500" />
+                          <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">QC / Güvenilirlik</h3>
+                        </div>
+                        <p className="text-[9px] text-slate-400 mt-1">Segmentasyon, maske optimizasyonu ve pipeline durum kontrolü</p>
+                      </div>
+                      <span className={cn(
+                        "px-3 py-1.5 rounded-full border text-[9px] font-black uppercase tracking-widest shrink-0",
+                        qcSummary.level === 'reliable' ? "bg-emerald-50 text-emerald-700 border-emerald-100" :
+                        qcSummary.level === 'warning' ? "bg-amber-50 text-amber-700 border-amber-100" :
+                        "bg-rose-50 text-rose-700 border-rose-100"
+                      )}>
+                        {qcSummary.label}
+                      </span>
+                    </div>
+
+                    {!hasQcFields ? (
+                      <div className="relative p-4 rounded-xl border border-dashed border-slate-200 bg-slate-50 text-[11px] font-semibold text-slate-500">
+                        Bu pipeline çıktısında QC alanı yok.
+                      </div>
+                    ) : (
+                      <div className="relative space-y-5">
+                        <div className="p-4 rounded-xl border border-slate-100 bg-slate-50">
+                          <div className="flex items-start gap-3">
+                            {qcSummary.level === 'reliable' ? (
+                              <CheckCircle2 size={18} className="text-emerald-600 mt-0.5 shrink-0" />
+                            ) : (
+                              <AlertCircle size={18} className={cn("mt-0.5 shrink-0", qcSummary.level === 'warning' ? "text-amber-600" : "text-rose-600")} />
+                            )}
+                            <div>
+                              <div className="text-[10px] font-black text-slate-800 uppercase tracking-widest">{qcSummary.label}</div>
+                              <p className="text-[10px] text-slate-500 leading-relaxed mt-1">{qcSummary.detail}</p>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <div className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Pipeline Durumu</div>
+                          <div className="flex flex-wrap gap-2">
+                            {qcStatusNotes.map((note) => (
+                              <span key={note} className="px-2.5 py-1.5 rounded-lg bg-slate-50 border border-slate-100 text-[9px] font-bold text-slate-600">
+                                {note}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          {qcRows.map((metric) => (
+                            <div key={metric.key} className={cn(
+                              "p-3 rounded-xl border shadow-sm",
+                              hasQcValue(metric.value) ? "bg-white border-slate-100" : "bg-slate-50/70 border-dashed border-slate-200"
+                            )}>
+                              <div className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">{metric.label}</div>
+                              <div className="text-sm font-black font-mono text-slate-900">{formatQcValue(metric.value, metric)}</div>
+                              <div className="text-[8px] text-slate-400 mt-1 leading-tight">{metric.description}</div>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <div className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Hatalar / Severity Grupları</div>
+                            <span className="text-[8px] font-mono text-slate-400">{Array.isArray(currentFrame.errors) ? currentFrame.errors.length : 0} kayıt</span>
+                          </div>
+                          {errorSeverityEntries.length > 0 ? (
+                            <div className="space-y-2">
+                              {errorSeverityEntries.map(([severity, errors]) => (
+                                <div key={severity} className="rounded-xl border border-slate-100 bg-white p-3">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <span className={cn(
+                                      "px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider",
+                                      ['critical', 'error'].includes(severity) ? "bg-rose-100 text-rose-700" :
+                                      ['warning', 'warn'].includes(severity) ? "bg-amber-100 text-amber-700" :
+                                      "bg-slate-100 text-slate-600"
+                                    )}>
+                                      {severity}
+                                    </span>
+                                    <span className="text-[8px] font-mono text-slate-400">{errors.length} adet</span>
+                                  </div>
+                                  <div className="space-y-1.5">
+                                    {errors.map((error: any, index: number) => (
+                                      <div key={`${severity}-${index}`} className="text-[9px] leading-relaxed text-slate-600 border-l-2 border-slate-100 pl-2">
+                                        <span className="font-bold text-slate-800">{error?.message ?? 'Mesaj yok'}</span>
+                                        {error?.remediation ? <span className="block text-slate-400 italic">{error.remediation}</span> : null}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="p-3 rounded-xl border border-emerald-100 bg-emerald-50 text-[10px] font-bold text-emerald-700">
+                              Severity gruplarında hata kaydı yok.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </motion.div>
 
                   {/* Export Panel */}
