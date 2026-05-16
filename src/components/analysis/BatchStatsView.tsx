@@ -1,7 +1,9 @@
 import { motion } from 'motion/react';
 import { AreaChart, Area, BarChart, Bar, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Activity, BarChart3, Layers, ListChecks, PieChart as PieIcon, TrendingUp } from 'lucide-react';
+import { cn } from '../../App';
 import { AnalysisCard } from './AnalysisCard';
+import { analysisTypography } from './typography';
 
 export function BatchStatsView({ model }: { model: any }) {
   const { totalFrames, avgStress, peakStress, avgCoverage, growthRate, pieData, chartData } = model;
@@ -17,15 +19,15 @@ export function BatchStatsView({ model }: { model: any }) {
           { label: 'Büyüme', value: `${growthRate.toFixed(1)}%`, icon: TrendingUp, color: 'text-indigo-500' },
         ].map((item) => (
           <AnalysisCard key={item.label} className="p-5">
-            <div className="flex items-center justify-between mb-4"><span className="text-[9px] font-black uppercase tracking-widest text-slate-400">{item.label}</span><item.icon size={16} className={item.color} /></div>
-            <div className="text-2xl font-black font-mono text-slate-900">{item.value}</div>
+            <div className="flex items-center justify-between mb-4"><span className="text-xs font-black text-slate-400">{item.label}</span><item.icon size={16} className={item.color} /></div>
+            <div className="text-2xl font-black tabular-nums text-slate-900">{item.value}</div>
           </AnalysisCard>
         ))}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <AnalysisCard className="flex flex-col">
-          <div className="flex items-center justify-between mb-6"><h3 className="text-[10px] font-bold text-slate-900 uppercase tracking-widest">Batch Durum Dağılımı</h3><PieIcon size={16} className="text-slate-400" /></div>
+          <div className="flex items-center justify-between mb-6"><h3 className={analysisTypography.cardTitle}>Batch Durum Dağılımı</h3><PieIcon size={16} className="text-slate-400" /></div>
           <div className="h-[250px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
@@ -38,13 +40,13 @@ export function BatchStatsView({ model }: { model: any }) {
           </div>
           <div className="grid grid-cols-2 gap-4 mt-4">
             {pieData.map((entry: any, i: number) => (
-              <div key={i} className="flex items-center gap-2"><div className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} /><span className="text-[10px] font-bold text-slate-600 uppercase">{entry.name}: {((entry.value / totalFrames) * 100).toFixed(0)}%</span></div>
+              <div key={i} className="flex items-center gap-2"><div className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} /><span className="text-xs font-bold text-slate-600">{entry.name}: {((entry.value / totalFrames) * 100).toFixed(0)}%</span></div>
             ))}
           </div>
         </AnalysisCard>
 
         <AnalysisCard className="lg:col-span-2">
-          <div className="flex items-center justify-between mb-6"><h3 className="text-[10px] font-bold text-slate-900 uppercase tracking-widest">Gelişim & Kapsama Trendi</h3><TrendingUp size={16} className="text-slate-400" /></div>
+          <div className="flex items-center justify-between mb-6"><h3 className={analysisTypography.cardTitle}>Gelişim & Kapsama Trendi</h3><TrendingUp size={16} className="text-slate-400" /></div>
           <div className="h-[300px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={chartData}>
@@ -59,7 +61,7 @@ export function BatchStatsView({ model }: { model: any }) {
       </div>
 
       <AnalysisCard>
-        <div className="flex items-center justify-between mb-8"><div><h3 className="text-[10px] font-bold text-slate-900 uppercase tracking-widest mb-1">Metrik Korelasyon Analizi</h3><p className="text-[9px] text-slate-400 font-bold uppercase">Frond Sayısı vs Alan Kapsaması (Batch-Wide)</p></div><ListChecks size={16} className="text-slate-400" /></div>
+        <div className="flex items-center justify-between mb-8"><div><h3 className={cn(analysisTypography.cardTitle, 'mb-1')}>Metrik Korelasyon Analizi</h3><p className="text-sm text-slate-500 font-semibold">Yaprak sayısı ve alan kapsaması (batch geneli)</p></div><ListChecks size={16} className="text-slate-400" /></div>
         <div className="h-[200px] w-full">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={chartData}>
@@ -71,8 +73,8 @@ export function BatchStatsView({ model }: { model: any }) {
           </ResponsiveContainer>
         </div>
         <div className="flex justify-center gap-8 mt-4">
-          <div className="flex items-center gap-2"><div className="w-3 h-3 bg-[#334155] rounded-sm" /><span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Frond Density</span></div>
-          <div className="flex items-center gap-2"><div className="w-3 h-3 bg-[#10b981] rounded-sm" /><span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Coverage Ratio</span></div>
+          <div className="flex items-center gap-2"><div className="w-3 h-3 bg-[#334155] rounded-sm" /><span className="text-xs font-bold text-slate-400">Yaprak yoğunluğu</span></div>
+          <div className="flex items-center gap-2"><div className="w-3 h-3 bg-[#10b981] rounded-sm" /><span className="text-xs font-bold text-slate-400">Kapsama oranı</span></div>
         </div>
       </AnalysisCard>
     </motion.div>
