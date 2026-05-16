@@ -74,6 +74,7 @@ def main():
         image_b64 = params.get("image")
         filename = params.get("filename", "unknown")
         config = params.get("config", {})
+        pool_area_m2 = float(params.get("pool_area_m2", 16.0))
         
         context["filename"] = filename
         context["config"] = config
@@ -126,7 +127,7 @@ def main():
             processor = AzollaProcessor(config=config)
             logger.info("AzollaProcessor initialized")
             
-            result = processor.run_pipeline(image_bytes, image_path=filename)
+            result = processor.run_pipeline(image_bytes, image_path=filename, pool_area_m2=pool_area_m2)
             logger.info("Pipeline completed successfully")
             
         except ProcessingError as e:
@@ -194,6 +195,7 @@ def main():
         response = {
             "status": "success",
             "metrics": result.get("metrics", {}),
+            "phenotyping": result.get("phenotyping", {}),
             "processed_image": f"data:image/jpeg;base64,{processed_b64}",
             "mask_image": f"data:image/jpeg;base64,{mask_b64}",
             "isolated_image": f"data:image/jpeg;base64,{isolated_b64}",
