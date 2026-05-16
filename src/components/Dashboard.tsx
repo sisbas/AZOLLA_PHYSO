@@ -556,6 +556,78 @@ const formatPercentChange = (value: number | null) => {
   return `${value > 0 ? '+' : ''}${value.toFixed(1)}%`;
 };
 
+const getFrameDateMs = (frame: any): number | null => {
+  const rawTimestamp = frame?.parsed_timestamp ?? frame?.timestamp;
+  if (!rawTimestamp) return null;
+
+  const timestampMs = Date.parse(String(rawTimestamp));
+  return Number.isFinite(timestampMs) ? timestampMs : null;
+};
+
+const getFramePairDeltaDays = (startFrame: any, endFrame: any, timeline?: any[], startIndex?: number, endIndex?: number): number | null => {
+  const startMs = getFrameDateMs(startFrame);
+  const endMs = getFrameDateMs(endFrame);
+
+  if (startMs !== null && endMs !== null) {
+    return (endMs - startMs) / (1000 * 60 * 60 * 24);
+  }
+
+  if (timeline && typeof startIndex === 'number' && typeof endIndex === 'number') {
+    const step = endIndex > startIndex ? 1 : -1;
+    let delta = 0;
+
+    for (let index = startIndex + step; step > 0 ? index <= endIndex : index >= endIndex; index += step) {
+      const frameDelta = getNumericValue(timeline[index]?.time_delta_days);
+      if (frameDelta === null) return null;
+      delta += step > 0 ? frameDelta : -frameDelta;
+    }
+
+    return delta;
+  }
+
+  return null;
+};
+
+const formatTimeDeltaLabel = (deltaDays: number | null) => {
+  if (deltaDays === null || !Number.isFinite(deltaDays)) return 'Tarih farkı bilinmiyor';
+  if (Math.abs(deltaDays) < Number.EPSILON) return '0 dakika';
+
+  const sign = deltaDays > 0 ? '+' : '-';
+  const absDays = Math.abs(deltaDays);
+  const absHours = absDays * 24;
+  const absMinutes = absHours * 60;
+
+  if (absDays >= 1) {
+    const days = Number.isInteger(absDays) ? absDays.toFixed(0) : absDays.toFixed(1);
+    return `${sign}${days} gün`;
+  }
+
+  if (absHours >= 1) {
+    const hours = Number.isInteger(absHours) ? absHours.toFixed(0) : absHours.toFixed(1);
+    return `${sign}${hours} saat`;
+  }
+
+  const minutes = Math.max(1, Math.round(absMinutes));
+  return `${sign}${minutes} dakika`;
+};
+
+const getClosestChronologicalPair = (timeline: any[]): [number, number] => {
+  if (timeline.length <= 1) return [0, 0];
+
+  let closestPair: [number, number] = [0, 1];
+  let closestDelta = Number.POSITIVE_INFINITY;
+
+  for (let index = 1; index < timeline.length; index += 1) {
+    const delta = Math.abs(getFramePairDeltaDays(timeline[index - 1], timeline[index], timeline, index - 1, index) ?? Number.POSITIVE_INFINITY);
+    if (delta < closestDelta) {
+      closestDelta = delta;
+      closestPair = [index - 1, index];
+    }
+  }
+
+  return closestPair;
+};
+
 
 type ChartMetricKey =
   | 'score'
@@ -873,11 +945,13 @@ export default function Dashboard({ taskId }: DashboardProps) {
   }, [taskId]);
 
   useEffect(() => {
-    const frameCount = data?.timeline?.length ?? 0;
+    const timeline = data?.timeline ?? [];
+    const frameCount = timeline.length;
     if (frameCount === 0) return;
 
-    setCompareStartIndex((index) => Math.min(index, frameCount - 1));
-    setCompareEndIndex((index) => Math.min(Math.max(index, frameCount > 1 ? 1 : 0), frameCount - 1));
+    const [defaultStartIndex, defaultEndIndex] = getClosestChronologicalPair(timeline);
+    setCompareStartIndex(defaultStartIndex);
+    setCompareEndIndex(defaultEndIndex);
   }, [data]);
 
   const generateAIInterpretation = async (stats: any) => {
@@ -1100,6 +1174,8 @@ export default function Dashboard({ taskId }: DashboardProps) {
 
   const compareStartFrame = data.timeline[compareStartIndex] || data.timeline[0];
   const compareEndFrame = data.timeline[compareEndIndex] || data.timeline[Math.min(1, data.timeline.length - 1)] || data.timeline[0];
+  const compareTimeDeltaDays = getFramePairDeltaDays(compareStartFrame, compareEndFrame, data.timeline, compareStartIndex, compareEndIndex);
+  const compareTimeDeltaLabel = formatTimeDeltaLabel(compareTimeDeltaDays);
   const compareRows = COMPARE_METRICS.map((metric) => {
     const startValue = getCompareMetricValue(compareStartFrame, metric.key);
     const endValue = getCompareMetricValue(compareEndFrame, metric.key);
@@ -1724,10 +1800,11 @@ export default function Dashboard({ taskId }: DashboardProps) {
                       <h3 className="text-[11px] font-bold text-slate-900 uppercase tracking-[0.2em] mb-1">Frame Karşılaştırma</h3>
                       <p className="text-[10px] text-slate-400">İki seçili kare arasında mutlak fark ve yüzde değişim analizi</p>
                     </div>
-                    <div className="flex items-center gap-2 text-[9px] font-black uppercase tracking-widest text-slate-500">
+                    <div className="flex flex-wrap items-center gap-2 text-[9px] font-black uppercase tracking-widest text-slate-500">
                       <span className="px-3 py-1.5 rounded-full bg-slate-100 border border-slate-200">Başlangıç: {`FRAME_${String(compareStartIndex + 1).padStart(2, '0')}`}</span>
                       <span className="text-slate-300">→</span>
                       <span className="px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">Bitiş: {`FRAME_${String(compareEndIndex + 1).padStart(2, '0')}`}</span>
+                      <span className="px-3 py-1.5 rounded-full bg-cyan-50 text-cyan-700 border border-cyan-100 normal-case tracking-normal">Tarih farkı: {compareTimeDeltaLabel}</span>
                     </div>
                   </div>
 

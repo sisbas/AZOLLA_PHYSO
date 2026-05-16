@@ -6,7 +6,8 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from typing import List, Dict, Any, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
+from backend.core.errors import format_error
 from backend.core import (
     StandardizationModule,
     SegmentationModule,
@@ -149,13 +150,86 @@ class AzollaPipeline:
 
     def run_series(self, frames: List[Tuple[np.ndarray, str]], experiment_id: str) -> Dict[str, Any]:
         """Runs the pipeline over a time-series and applies temporal decision engine."""
+        def parse_frame_timestamp(timestamp: str):
+            """Parse frame timestamps into datetimes for chronological ordering."""
+            if timestamp is None:
+                return None
+
+            ts_text = str(timestamp).strip()
+            if not ts_text:
+                return None
+
+            normalized = ts_text.replace("Z", "+00:00")
+            def normalize_datetime(value: datetime):
+                if value.tzinfo is not None:
+                    return value.astimezone(timezone.utc).replace(tzinfo=None)
+                return value
+
+            try:
+                return normalize_datetime(datetime.fromisoformat(normalized))
+            except ValueError:
+                pass
+
+            parsed = pd.to_datetime(ts_text, errors='coerce')
+            if pd.isna(parsed):
+                return None
+
+            if hasattr(parsed, 'to_pydatetime'):
+                return normalize_datetime(parsed.to_pydatetime())
+
+            return parsed
+
         try:
             self.logger.info(f"Starting series processing for experiment {experiment_id} with {len(frames)} frames")
+            parsed_frames = []
+            for input_index, (img, ts) in enumerate(frames):
+                parsed_ts = parse_frame_timestamp(ts)
+                parse_error = None
+                if parsed_ts is None:
+                    parse_error = format_error(
+                        "timeline",
+                        f"Timestamp could not be parsed for chronological sorting: {ts}",
+                        "Use an ISO-8601 timestamp or another unambiguous date/time format. Unparsed frames are kept after parsed frames in input order.",
+                        severity="warning",
+                        category="validation",
+                        error_code="TIMESTAMP_PARSE_FAILED",
+                        details={"timestamp": ts, "input_index": input_index}
+                    )
+                    self.logger.warning(parse_error["message"])
+
+                parsed_frames.append({
+                    "img": img,
+                    "timestamp": ts,
+                    "parsed_timestamp": parsed_ts,
+                    "input_index": input_index,
+                    "parse_error": parse_error,
+                })
+
+            parsed_frames.sort(key=lambda frame: (
+                frame["parsed_timestamp"] is None,
+                frame["parsed_timestamp"] or datetime.max,
+                frame["input_index"]
+            ))
+
             results_list = []
-            for i, (img, ts) in enumerate(frames):
-                self.logger.debug(f"Processing frame {i+1}/{len(frames)} at {ts}")
+            previous_parsed_ts = None
+            for i, frame in enumerate(parsed_frames):
+                img = frame["img"]
+                ts = frame["timestamp"]
+                parsed_ts = frame["parsed_timestamp"]
+                self.logger.debug(f"Processing frame {i+1}/{len(parsed_frames)} at {ts}")
                 res = self.run_single_frame(img, ts, experiment_id)
+                res["time_delta_days"] = (
+                    (parsed_ts - previous_parsed_ts).total_seconds() / 86400.0
+                    if parsed_ts is not None and previous_parsed_ts is not None
+                    else None
+                )
+                if parsed_ts is not None:
+                    res["parsed_timestamp"] = parsed_ts.isoformat()
+                if frame["parse_error"] is not None:
+                    res.setdefault("errors", []).append(frame["parse_error"])
                 results_list.append(res)
+                previous_parsed_ts = parsed_ts
                 
             self.logger.info(f"Completed processing {len(frames)} frames, running decision engine...")
             
