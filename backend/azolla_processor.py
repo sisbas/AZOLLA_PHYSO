@@ -15,6 +15,7 @@ from dataclasses import dataclass, asdict
 from typing import Dict, List, Optional, Any, Union
 from PIL import Image
 from PIL.ExifTags import TAGS
+from core.phenotyping import PhenotypingModule
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -49,6 +50,9 @@ class AzollaProcessor:
         }
         if config:
             self.config.update(config)
+
+        phenotyping_config = config.get("phenotyping", {}) if config else {}
+        self.phenotyping = PhenotypingModule({"phenotyping": phenotyping_config})
 
     def load_and_validate(self, image_input: Union[str, bytes]) -> np.ndarray:
         """
@@ -243,7 +247,7 @@ class AzollaProcessor:
         
         return datetime.now().strftime('%Y-%m-%d %H:%M')
 
-    def run_pipeline(self, image_input: Union[str, bytes], image_path: Optional[str] = None) -> Dict[str, Any]:
+    def run_pipeline(self, image_input: Union[str, bytes], image_path: Optional[str] = None, pool_area_m2: float = 16.0) -> Dict[str, Any]:
         """
         Execute full pipeline and return structured result.
         """
@@ -270,12 +274,18 @@ class AzollaProcessor:
         # 5. Normalization
         normalized = self.normalize_and_standardize(balanced)
         
-        # 6. Build isolated image + overlay
+        # 6. Phenotyping - single source for service response metrics
+        self.phenotyping.pixel_to_m2 = (float(pool_area_m2) / metrics.total_pixels) if metrics.total_pixels else 0.0
+        phenotype_metrics = self.phenotyping.process(cv2.cvtColor(normalized, cv2.COLOR_BGR2RGB), mask)
+        phenotyping = self.phenotyping.to_dict(phenotype_metrics)
+
+        # 7. Build isolated image + overlay
         isolated_image = cv2.bitwise_and(normalized, normalized, mask=mask)
         final_image = self.add_timestamp_overlay(normalized, metrics)
         
         return {
             "metrics": asdict(metrics),
+            "phenotyping": phenotyping,
             "processed_image": final_image,
             "isolated_image": isolated_image,
             "mask": mask,
@@ -294,6 +304,7 @@ def process_single(image_data: bytes, path: Optional[str] = None) -> str:
     return json.dumps({
         "status": "success",
         "metrics": result["metrics"],
+        "phenotyping": result["phenotyping"],
         "confidence": result["confidence_score"]
     })
 

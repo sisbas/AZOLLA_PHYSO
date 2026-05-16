@@ -480,6 +480,14 @@ class PhenotypingModule:
                 fresh_biomass_g_m2=0.0,
                 dry_biomass_g_m2=0.0,
                 protein_content_percent=0.0,
+                biomass_calibration={
+                    'alpha': self.alpha,
+                    'beta': self.beta,
+                    'alpha_ci': list(self.alpha_ci),
+                    'r_squared': self.r_squared,
+                    'reference': self.calibration_reference,
+                    'note': 'Korelasyon ≠ nedensellik. Bu skor erken uyarı indeksidir; biyokimyasal validasyon gerektirir.'
+                },
                 growth_rate_percent_day=0.0,
                 doubling_time_days=0.0,
                 max_coverage_percent=0.0,
@@ -519,7 +527,8 @@ class PhenotypingModule:
             'biyokutle_tahmini': {
                 'fresh_biomass_g_m2': metrics.fresh_biomass_g_m2,
                 'dry_biomass_g_m2': metrics.dry_biomass_g_m2,
-                'protein_content_percent': metrics.protein_content_percent
+                'protein_content_percent': metrics.protein_content_percent,
+                'calibration': metrics.biomass_calibration
             },
             'buyume_parametreleri': {
                 'growth_rate_percent_day': metrics.growth_rate_percent_day,
