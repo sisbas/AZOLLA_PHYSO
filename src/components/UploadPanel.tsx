@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Upload, FileCode, CheckCircle2, Loader2, AlertTriangle, AlertCircle, Database } from 'lucide-react';
+import { Upload, FileCode, CheckCircle2, Loader2, AlertTriangle, AlertCircle, Database, CalendarDays, Lightbulb } from 'lucide-react';
 import { motion } from 'motion/react';
 import { cn } from '../App';
 
@@ -31,6 +31,25 @@ const timestampFromFilename = (filename: string): string | null => {
   }
 
   return null;
+};
+
+
+const formatDetectedDate = (timestamp: string) => timestamp.slice(0, 10);
+
+const suggestedDatedFilename = (filename: string) => {
+  const lastDotIndex = filename.lastIndexOf('.');
+  const baseName = lastDotIndex > 0 ? filename.slice(0, lastDotIndex) : filename;
+  const extension = lastDotIndex > 0 ? filename.slice(lastDotIndex) : '';
+
+  return `${baseName}_YYYY-MM-DD${extension}`;
+};
+
+const fileDateMetadata = (file: File) => {
+  const detectedTimestamp = timestampFromFilename(file.name);
+
+  return detectedTimestamp
+    ? { detectedDate: formatDetectedDate(detectedTimestamp), suggestion: null }
+    : { detectedDate: null, suggestion: suggestedDatedFilename(file.name) };
 };
 
 const timestampForFile = (file: File) => {
@@ -180,6 +199,27 @@ export default function UploadPanel({ onComplete }: UploadPanelProps) {
         <div className="absolute -top-10 -right-10 w-40 h-40 bg-primary/5 rounded-full blur-3xl pointer-events-none" />
       </div>
 
+      <div className="rounded-2xl border border-emerald-100 bg-emerald-50/80 p-5 shadow-sm">
+        <div className="flex items-start gap-3">
+          <div className="mt-0.5 rounded-xl bg-white p-2 text-emerald-600 shadow-sm">
+            <Lightbulb size={18} />
+          </div>
+          <div className="space-y-3">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-emerald-700">İyi veri için ipuçları</p>
+              <p className="mt-1 text-xs font-medium text-emerald-900/80">Analiz tutarlılığı için çekim koşullarını her ölçümde aynı tutun.</p>
+            </div>
+            <ul className="grid gap-2 text-xs font-semibold text-emerald-900 sm:grid-cols-2">
+              <li>• Kamerayı sabit konumda kullanın.</li>
+              <li>• Homojen ışık sağlayın.</li>
+              <li>• Her çekimde aynı havuz alanını kadraja alın.</li>
+              <li>• Dosya adında tarihi belirtin: YYYY-MM-DD.</li>
+              <li>• Bulanık görüntülerden kaçının.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
       <div className={cn(
         "bg-white/80 backdrop-blur-md border border-slate-200 rounded-2xl p-12 flex flex-col items-center justify-center gap-8 transition-all shadow-xl shadow-slate-200/50 group relative overflow-hidden",
         files.length > 0 ? "ring-2 ring-slate-900 border-transparent" : "hover:border-primary/50"
@@ -240,20 +280,35 @@ export default function UploadPanel({ onComplete }: UploadPanelProps) {
           </div>
           
           <div className="space-y-2 max-h-56 overflow-y-auto pr-3 scrollbar-thin scrollbar-thumb-slate-200">
-            {files.map((file, i) => (
-              <div key={i} className="flex items-center justify-between py-3 px-4 rounded-xl bg-slate-50 border border-slate-100/50 group hover:bg-white hover:shadow-md hover:border-slate-200 transition-all">
-                <div className="flex items-center gap-3 shrink-0">
-                  <div className="p-1.5 bg-white rounded-lg border border-slate-100 shadow-sm text-slate-400">
-                    <FileCode size={14} />
+            {files.map((file, i) => {
+              const dateMetadata = fileDateMetadata(file);
+
+              return (
+                <div key={i} className="flex flex-col gap-3 py-3 px-4 rounded-xl bg-slate-50 border border-slate-100/50 group hover:bg-white hover:shadow-md hover:border-slate-200 transition-all sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <div className="p-1.5 bg-white rounded-lg border border-slate-100 shadow-sm text-slate-400">
+                      <FileCode size={14} />
+                    </div>
+                    <div className="min-w-0 space-y-1">
+                      <span className="block truncate text-xs font-bold text-slate-700 sm:max-w-[240px]">{file.name}</span>
+                      {dateMetadata.detectedDate ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-emerald-700">
+                          <CalendarDays size={10} /> Tarih: {dateMetadata.detectedDate}
+                        </span>
+                      ) : (
+                        <span className="block text-[9px] font-semibold leading-relaxed text-amber-600">
+                          Tarih algılanmadı. Öneri: <span className="font-mono">{dateMetadata.suggestion}</span>
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <span className="text-xs font-bold text-slate-700 truncate max-w-[200px]">{file.name}</span>
+                  <div className="flex items-center gap-4 sm:justify-end">
+                    <span className="text-slate-300 font-mono text-[9px] uppercase">Image/Series</span>
+                    <span className="text-slate-900 font-mono text-[10px] font-bold leading-none shrink-0">{(file.size / 1024 / 1024).toFixed(2)}<span className="text-slate-300 ml-0.5">MB</span></span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-4">
-                  <span className="text-slate-300 font-mono text-[9px] uppercase">Image/Series</span>
-                  <span className="text-slate-900 font-mono text-[10px] font-bold leading-none shrink-0">{(file.size / 1024 / 1024).toFixed(2)}<span className="text-slate-300 ml-0.5">MB</span></span>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           {isUploading && (

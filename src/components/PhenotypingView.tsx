@@ -66,6 +66,54 @@ interface MetricCardProps {
 
 const DEFAULT_POOL_AREA_M2 = 16;
 
+const getQualityWarningText = (warning: any) => {
+  if (typeof warning === 'string') return warning;
+
+  const candidates = [
+    warning?.message,
+    warning?.detail,
+    warning?.details,
+    warning?.error,
+    warning?.code,
+    warning?.type,
+    warning?.reason,
+  ].filter(Boolean);
+
+  return candidates.length > 0 ? candidates.join(' ') : JSON.stringify(warning ?? '');
+};
+
+const translateQualityWarning = (warning: any) => {
+  const rawText = getQualityWarningText(warning);
+  const text = rawText.toLocaleLowerCase('tr-TR');
+
+  if (/(illumination|lighting|light|brightness|exposure|shadow|glare|ışık|isik|aydınlatma|parlama|gölge)/.test(text)) {
+    return 'Işık çok değişken: gölge ve parlamayı azaltıp homojen ışıkta tekrar çekin.';
+  }
+
+  if (/(azolla.*(area|low|small)|area.*(low|small)|coverage.*(low|small)|too\s*low|azolla alan|kaplama.*düşük|alan.*düşük)/.test(text)) {
+    return 'Azolla alanı çok düşük: aynı havuz alanını daha net kadraja alın veya örnek yoğunluğunu kontrol edin.';
+  }
+
+  if (/(date|timestamp|time|tarih|zaman)/.test(text) && /(missing|absent|not found|eksik|yok|bulunamadı|algılanmadı)/.test(text)) {
+    return 'Tarih bilgisi eksik: dosya adına YYYY-MM-DD biçiminde tarih ekleyin.';
+  }
+
+  if (/(blur|blurry|focus|sharp|bulanık|netlik|odak)/.test(text)) {
+    return 'Görüntü bulanık: kamerayı sabitleyip net odakla yeniden çekin.';
+  }
+
+  if (/(contrast|segmentation|mask|kontrast|segmentasyon)/.test(text)) {
+    return 'Kontrast zayıf: su ve Azolla ayrımını artıracak daha dengeli ışıkta çekim yapın.';
+  }
+
+  return 'Kalite uyarısı var: çekimi sabit kamera, homojen ışık ve doğru havuz alanı ile tekrar kontrol edin.';
+};
+
+const getQualityAdvice = (warnings?: any[]) => (
+  Array.from(new Set((warnings ?? []).map(translateQualityWarning))).filter(Boolean)
+);
+
+
 const formatNullableMetric = (
   value: number | null | undefined,
   { prefix = '', suffix = '', digits = 1 }: { prefix?: string; suffix?: string; digits?: number } = {}
@@ -239,6 +287,10 @@ export default function PhenotypingView() {
                 placeholder="16"
               />
             </label>
+            <div className="flex items-start gap-2 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-semibold leading-relaxed text-blue-800">
+              <Info size={14} className="mt-0.5 shrink-0" />
+              <span>Ölçüm doğruluğu alan kalibrasyonuna bağlıdır; havuz alanını gerçek ölçüye göre girin.</span>
+            </div>
             
             {mode === 'single' ? (
               <label className="block text-[10px] font-black uppercase tracking-widest text-slate-500">
@@ -281,6 +333,8 @@ export default function PhenotypingView() {
     { name: 'Korelasyon', value: data.doku_analizi.correlation },
   ];
 
+  const qualityAdvice = getQualityAdvice(data.errors);
+
   return (
     <div className="min-h-screen bg-[#f8fafc]">
       {/* Header */}
@@ -321,6 +375,24 @@ export default function PhenotypingView() {
 
       {/* Main Content */}
       <div className="max-w-[1600px] mx-auto p-8">
+        {qualityAdvice.length > 0 && (
+          <div className="mb-6 rounded-2xl border border-amber-100 bg-amber-50 p-5 shadow-sm">
+            <div className="flex items-start gap-3">
+              <div className="rounded-xl bg-white p-2 text-amber-600 shadow-sm">
+                <AlertCircle size={18} />
+              </div>
+              <div>
+                <h2 className="text-[10px] font-black uppercase tracking-[0.18em] text-amber-700">Kalite önerileri</h2>
+                <ul className="mt-2 space-y-1 text-xs font-semibold leading-relaxed text-amber-900">
+                  {qualityAdvice.map((advice) => (
+                    <li key={advice}>• {advice}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Segmentasyon ve Alan Metrikleri */}
         <div className="mb-8">
           {(segmentationMask || densityMap) && (
