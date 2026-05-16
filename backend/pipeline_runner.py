@@ -54,7 +54,9 @@ class AzollaPipeline:
         self.logger = get_logger("pipeline")
         self.logger.info("Pipeline modules initialized")
 
-    def run_single_frame(self, img_bgr: np.ndarray, timestamp: str, experiment_id: str) -> Dict[str, Any]:
+    def run_single_frame(self, img_bgr: np.ndarray, timestamp: str, experiment_id: str,
+                         previous_results: Dict[str, Any] = None,
+                         time_diff_days: float = 1.0) -> Dict[str, Any]:
         """Runs the 10-step logic on a single image frame with phenotyping."""
         try:
             self.logger.info(f"Processing frame at {timestamp} for experiment {experiment_id}")
@@ -85,7 +87,12 @@ class AzollaPipeline:
             
             # 5. Fenotipleme ve Biyokütle Tahmini (YENİ)
             self.logger.debug("Running phenotyping...")
-            phenotype_metrics = self.pheno.process(img_rgb, opt_mask)
+            phenotype_metrics = self.pheno.process(
+                img_rgb,
+                opt_mask,
+                previous_results=previous_results,
+                time_diff_days=time_diff_days
+            )
             all_errors.extend(phenotype_metrics.errors)
             
             # 8 & 9. Frond Segmenter (with Fallback)
@@ -212,24 +219,36 @@ class AzollaPipeline:
             ))
 
             results_list = []
-            previous_parsed_ts = None
+            previous_successful_result = None
+            previous_successful_parsed_ts = None
             for i, frame in enumerate(parsed_frames):
                 img = frame["img"]
                 ts = frame["timestamp"]
                 parsed_ts = frame["parsed_timestamp"]
                 self.logger.debug(f"Processing frame {i+1}/{len(parsed_frames)} at {ts}")
-                res = self.run_single_frame(img, ts, experiment_id)
-                res["time_delta_days"] = (
-                    (parsed_ts - previous_parsed_ts).total_seconds() / 86400.0
-                    if parsed_ts is not None and previous_parsed_ts is not None
+                time_diff_days = (
+                    (parsed_ts - previous_successful_parsed_ts).total_seconds() / 86400.0
+                    if parsed_ts is not None and previous_successful_parsed_ts is not None
                     else None
                 )
+                res = self.run_single_frame(
+                    img,
+                    ts,
+                    experiment_id,
+                    previous_results=previous_successful_result,
+                    time_diff_days=time_diff_days
+                )
+                res["time_delta_days"] = time_diff_days
                 if parsed_ts is not None:
                     res["parsed_timestamp"] = parsed_ts.isoformat()
                 if frame["parse_error"] is not None:
                     res.setdefault("errors", []).append(frame["parse_error"])
                 results_list.append(res)
-                previous_parsed_ts = parsed_ts
+
+                has_error = any(error.get('severity') == 'error' for error in res.get('errors', []))
+                if not has_error:
+                    previous_successful_result = res
+                    previous_successful_parsed_ts = parsed_ts
                 
             self.logger.info(f"Completed processing {len(frames)} frames, running decision engine...")
             
