@@ -8,6 +8,8 @@ interface DashboardProps {
   taskId: string;
 }
 
+type CompareViewMode = 'rgb' | 'pseudo' | 'overlay' | 'isolated';
+
 type PhenotypingMetricKey =
   | 'coverage_percent'
   | 'water_surface_percent'
@@ -536,13 +538,33 @@ const getCompareMetricValue = (frame: any, key: CompareMetricKey): number | null
   return getNumericValue(frame.metrics?.[key]);
 };
 
-const getCompareImageUrl = (frame: any) => (
-  frame?.image_urls?.isolated
-  ?? frame?.image_urls?.overlay
-  ?? frame?.image_urls?.pseudocolor
-  ?? frame?.image_urls?.rgb
-  ?? ''
-);
+const getImageUrlForMode = (frame: any, mode: CompareViewMode) => {
+  const urls = frame?.image_urls ?? {};
+
+  if (mode === 'rgb') return urls.rgb ?? '';
+  if (mode === 'pseudo') return urls.pseudocolor ?? urls.rgb ?? '';
+  if (mode === 'overlay') return urls.overlay ?? urls.pseudocolor ?? urls.rgb ?? '';
+
+  return urls.isolated ?? urls.overlay ?? urls.pseudocolor ?? urls.rgb ?? '';
+};
+
+const getCompareImageUrl = (frame: any, mode: CompareViewMode) => getImageUrlForMode(frame, mode);
+
+const formatFrameDateLabel = (frame: any) => {
+  const rawTimestamp = frame?.parsed_timestamp ?? frame?.timestamp;
+  if (!rawTimestamp) return 'Tarih yok';
+
+  const timestampMs = Date.parse(String(rawTimestamp));
+  if (!Number.isFinite(timestampMs)) return String(rawTimestamp);
+
+  return new Intl.DateTimeFormat('tr-TR', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(timestampMs));
+};
 
 const formatCompareValue = (value: number | null, metric: CompareMetricConfig, options?: { signed?: boolean; delta?: boolean }) => {
   if (value === null) return 'Veri yok';
@@ -889,7 +911,8 @@ export default function Dashboard({ taskId }: DashboardProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [compareStartIndex, setCompareStartIndex] = useState(0);
   const [compareEndIndex, setCompareEndIndex] = useState(1);
-  const [viewMode, setViewMode] = useState<'rgb' | 'pseudo' | 'overlay' | 'isolated'>('isolated');
+  const [viewMode, setViewMode] = useState<CompareViewMode>('isolated');
+  const [compareViewMode, setCompareViewMode] = useState<CompareViewMode>('isolated');
   const [activeTab, setActiveTab] = useState<'analysis' | 'stats' | 'insights'>('analysis');
   const [interpretation, setInterpretation] = useState<string>('');
   const [interpretationError, setInterpretationError] = useState<string>('');
@@ -1079,23 +1102,59 @@ export default function Dashboard({ taskId }: DashboardProps) {
     };
   });
   
-  const handleDownload = () => {
+  const handleDownload = (mode: CompareViewMode = viewMode) => {
     if (!currentFrame) return;
+    const url = getImageUrlForMode(currentFrame, mode);
+    if (!url) return;
+
     const link = document.createElement('a');
-    let url = currentFrame.image_urls.rgb;
-    let suffix = viewMode;
-    
-    if (viewMode === 'pseudo') {
-      url = currentFrame.image_urls.pseudocolor;
-    } else if (viewMode === 'isolated') {
-      url = currentFrame.image_urls.isolated;
-    }
-    
     link.href = url;
-    link.download = `azolla_export_frame_${currentIndex + 1}_${suffix}.png`;
+    link.download = `azolla_export_frame_${currentIndex + 1}_${mode}.png`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const downloadCsv = () => {
+    if (!data?.timeline?.length) return;
+
+    const headers = [
+      'frame',
+      'timestamp',
+      'status',
+      ...COMPARE_METRICS.map((metric) => metric.key),
+      'rgb_url',
+      'pseudocolor_url',
+      'overlay_url',
+      'isolated_url',
+    ];
+    const escapeCsvCell = (value: unknown) => {
+      if (value === null || value === undefined) return '';
+      const text = String(value);
+      return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+    };
+    const rows = data.timeline.map((frame: any, index: number) => [
+      `FRAME_${String(index + 1).padStart(2, '0')}`,
+      frame?.timestamp ?? frame?.parsed_timestamp ?? '',
+      frame?.status ?? '',
+      ...COMPARE_METRICS.map((metric) => getCompareMetricValue(frame, metric.key) ?? ''),
+      frame?.image_urls?.rgb ?? '',
+      frame?.image_urls?.pseudocolor ?? '',
+      frame?.image_urls?.overlay ?? '',
+      frame?.image_urls?.isolated ?? '',
+    ]);
+    const csv = [headers, ...rows]
+      .map((row) => row.map(escapeCsvCell).join(','))
+      .join('\n');
+    const blob = new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `azolla_full_batch_report_${taskId}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   const metricStats = CHART_METRICS.reduce((acc, metric) => {
@@ -1192,6 +1251,10 @@ export default function Dashboard({ taskId }: DashboardProps) {
       percentChange,
     };
   });
+  const comparePrimaryDelta = compareRows.find((metric) => metric.key === 'coverage_pct') ?? compareRows.find((metric) => metric.hasData);
+  const compareDeltaBadgeLabel = comparePrimaryDelta && comparePrimaryDelta.delta !== null
+    ? `${comparePrimaryDelta.label} Δ ${formatCompareValue(comparePrimaryDelta.delta, comparePrimaryDelta, { signed: true, delta: true })}`
+    : 'Delta metriği yok';
 
   const currentPhenotyping = currentFrame.phenotyping;
   const currentFrondCount = getNumericValue(currentFrame.metrics?.frond_count);
@@ -1764,29 +1827,33 @@ export default function Dashboard({ taskId }: DashboardProps) {
                        </div>
                        <div className="grid grid-cols-1 gap-2">
                          <button 
-                           onClick={() => { setViewMode('rgb'); setTimeout(handleDownload, 100); }}
-                           className="group flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 hover:border-white/20 transition-all text-left"
+                           onClick={() => { setViewMode('rgb'); handleDownload('rgb'); }}
+                           className="group flex items-center justify-between gap-3 p-3 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 hover:border-white/20 transition-all text-left"
                          >
                            <div className="flex flex-col">
                              <span className="text-[10px] font-bold uppercase tracking-tight">Raw_RGB</span>
                              <span className="text-[8px] text-white/40">Orijinal Spektrum</span>
                            </div>
-                           <Download size={14} className="opacity-0 group-hover:opacity-100 transition-opacity" />
+                           <span className="shrink-0 inline-flex items-center gap-2 rounded-lg bg-white/10 px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-white">
+                             <Download size={13} /> PNG indir
+                           </span>
                          </button>
                          <button 
-                           onClick={() => { setViewMode('pseudo'); setTimeout(handleDownload, 100); }}
-                           className="group flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 hover:border-white/20 transition-all text-left"
+                           onClick={() => { setViewMode('pseudo'); handleDownload('pseudo'); }}
+                           className="group flex items-center justify-between gap-3 p-3 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 hover:border-white/20 transition-all text-left"
                          >
                            <div className="flex flex-col">
                              <span className="text-[10px] font-bold uppercase tracking-tight">Physio_Map</span>
                              <span className="text-[8px] text-white/40">Sahte Renk Termal</span>
                            </div>
-                           <Download size={14} className="opacity-0 group-hover:opacity-100 transition-opacity" />
+                           <span className="shrink-0 inline-flex items-center gap-2 rounded-lg bg-white/10 px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-white">
+                             <Download size={13} /> PNG indir
+                           </span>
                          </button>
                        </div>
                      </div>
-                     <button className="w-full bg-[#10b981] hover:bg-emerald-600 text-white text-[10px] font-bold uppercase py-4 rounded-xl flex items-center justify-center gap-3 transition-all relative z-10 shadow-lg shadow-emerald-900/40">
-                       <Layers size={14} /> Full_Batch_Report (CSV)
+                     <button onClick={downloadCsv} className="w-full bg-[#10b981] hover:bg-emerald-600 text-white text-[10px] font-bold uppercase py-4 rounded-xl flex items-center justify-center gap-3 transition-all relative z-10 shadow-lg shadow-emerald-900/40">
+                       <Layers size={14} /> Full_Batch_Report (CSV) indir
                      </button>
                   </div>
                 </div>
@@ -1805,6 +1872,7 @@ export default function Dashboard({ taskId }: DashboardProps) {
                       <span className="text-slate-300">→</span>
                       <span className="px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">Bitiş: {`FRAME_${String(compareEndIndex + 1).padStart(2, '0')}`}</span>
                       <span className="px-3 py-1.5 rounded-full bg-cyan-50 text-cyan-700 border border-cyan-100 normal-case tracking-normal">Tarih farkı: {compareTimeDeltaLabel}</span>
+                      <span className="px-3 py-1.5 rounded-full bg-violet-50 text-violet-700 border border-violet-100 normal-case tracking-normal">{compareDeltaBadgeLabel}</span>
                     </div>
                   </div>
 
@@ -1846,30 +1914,74 @@ export default function Dashboard({ taskId }: DashboardProps) {
                           </div>
                         </div>
                       ))}
+                      <div className="pt-3 border-t border-slate-200/70 space-y-2">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Görünüm Modu</span>
+                          <span className="text-[10px] font-mono font-black text-slate-900 uppercase">{compareViewMode}</span>
+                        </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                          {([
+                            { mode: 'rgb', label: 'RGB' },
+                            { mode: 'pseudo', label: 'Pseudocolor' },
+                            { mode: 'overlay', label: 'Overlay' },
+                            { mode: 'isolated', label: 'Isolated' },
+                          ] as Array<{ mode: CompareViewMode; label: string }>).map((option) => (
+                            <button
+                              key={option.mode}
+                              onClick={() => setCompareViewMode(option.mode)}
+                              className={cn(
+                                "rounded-xl border px-3 py-2 text-[9px] font-black uppercase tracking-widest transition-all",
+                                compareViewMode === option.mode
+                                  ? "border-slate-950 bg-slate-950 text-white shadow-lg shadow-slate-200"
+                                  : "border-slate-200 bg-white text-slate-500 hover:border-slate-400 hover:text-slate-900"
+                              )}
+                            >
+                              {option.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] gap-3 md:gap-2 items-stretch">
                       {[
                         { label: 'Başlangıç', frame: compareStartFrame, index: compareStartIndex },
                         { label: 'Bitiş', frame: compareEndFrame, index: compareEndIndex },
-                      ].map((item) => (
-                        <div key={item.label} className="rounded-2xl bg-slate-950 border border-slate-800 overflow-hidden min-h-[190px] flex flex-col">
-                          <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
-                            <span className="text-[9px] font-black text-white/50 uppercase tracking-widest">{item.label}</span>
-                            <span className="text-[10px] font-mono font-black text-white">{`FRAME_${String(item.index + 1).padStart(2, '0')}`}</span>
+                      ].map((item, itemIndex) => (
+                        <React.Fragment key={item.label}>
+                          {itemIndex === 1 && (
+                            <div className="flex md:flex-col items-center justify-center gap-2 px-1 py-1">
+                              <div className="hidden md:block w-px flex-1 bg-slate-200" />
+                              <div className="rounded-full border border-cyan-100 bg-cyan-50 px-3 py-1.5 text-[9px] font-black text-cyan-700 uppercase tracking-widest whitespace-nowrap">
+                                {compareTimeDeltaLabel}
+                              </div>
+                              <div className="rounded-full border border-violet-100 bg-violet-50 px-3 py-1.5 text-[9px] font-black text-violet-700 uppercase tracking-widest whitespace-nowrap">
+                                {compareDeltaBadgeLabel}
+                              </div>
+                              <div className="hidden md:block w-px flex-1 bg-slate-200" />
+                            </div>
+                          )}
+                          <div className="rounded-2xl bg-slate-950 border border-slate-800 overflow-hidden min-h-[210px] flex flex-col">
+                            <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-white/10">
+                              <div className="min-w-0">
+                                <span className="block text-[9px] font-black text-white/50 uppercase tracking-widest">{item.label}</span>
+                                <span className="mt-1 block truncate text-[9px] font-mono font-bold text-white/50">{formatFrameDateLabel(item.frame)}</span>
+                              </div>
+                              <span className="shrink-0 text-[10px] font-mono font-black text-white">{`FRAME_${String(item.index + 1).padStart(2, '0')}`}</span>
+                            </div>
+                            <div className="flex-1 relative flex items-center justify-center p-3">
+                              {getCompareImageUrl(item.frame, compareViewMode) ? (
+                                <img
+                                  src={getCompareImageUrl(item.frame, compareViewMode)}
+                                  alt={`${item.label} ${compareViewMode} karşılaştırma çıktısı`}
+                                  className="max-h-44 max-w-full object-contain rounded-lg drop-shadow-[0_0_18px_rgba(16,185,129,0.22)]"
+                                />
+                              ) : (
+                                <div className="text-[10px] font-bold uppercase tracking-widest text-white/40">Görsel yok</div>
+                              )}
+                            </div>
                           </div>
-                          <div className="flex-1 relative flex items-center justify-center p-3">
-                            {getCompareImageUrl(item.frame) ? (
-                              <img
-                                src={getCompareImageUrl(item.frame)}
-                                alt={`${item.label} karşılaştırma çıktısı`}
-                                className="max-h-44 max-w-full object-contain rounded-lg drop-shadow-[0_0_18px_rgba(16,185,129,0.22)]"
-                              />
-                            ) : (
-                              <div className="text-[10px] font-bold uppercase tracking-widest text-white/40">Görsel yok</div>
-                            )}
-                          </div>
-                        </div>
+                        </React.Fragment>
                       ))}
                     </div>
                   </div>
