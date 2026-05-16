@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Upload, FileCode, CheckCircle2, Loader2, AlertTriangle, AlertCircle, Database, Frame } from 'lucide-react';
+import { Upload, FileCode, CheckCircle2, Loader2, AlertTriangle, AlertCircle, Database } from 'lucide-react';
 import { motion } from 'motion/react';
 import { cn } from '../App';
 
@@ -134,14 +134,6 @@ export default function UploadPanel({ onComplete }: UploadPanelProps) {
             </div>
             <h2 className="text-3xl font-black tracking-tighter text-slate-900 uppercase">Veri Giriş Portalı</h2>
           </div>
-          
-          <button 
-            onClick={() => window.dispatchEvent(new CustomEvent('change-view', { detail: 'roi' }))}
-            className="flex items-center gap-2 px-4 py-2 border border-slate-200 rounded-xl text-[10px] font-bold uppercase tracking-widest text-slate-500 hover:bg-slate-50 transition-all hover:text-slate-900"
-          >
-            <Frame size={14} />
-            ROI Editör'e Git
-          </button>
         </div>
         <p className="text-sm text-slate-500 font-medium">Fizyolojik stres analizi için RGB zaman serisini (Z-Stack) sisteme aktarın.</p>
         <div className="absolute -top-10 -right-10 w-40 h-40 bg-primary/5 rounded-full blur-3xl pointer-events-none" />

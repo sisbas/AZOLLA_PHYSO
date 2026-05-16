@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Layout, FlaskConical, History, Settings, Upload, Activity, AlertCircle, ChevronRight, Play, Pause, Microscope } from 'lucide-react';
+import { FlaskConical, History, Microscope } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -12,16 +12,17 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export type ViewState = 'upload' | 'analysis' | 'settings' | 'phenotyping' | 'azolla-rgb';
+export type ViewState = 'upload' | 'analysis' | 'phenotyping' | 'settings';
+
+const isViewState = (view: unknown): view is ViewState =>
+  view === 'upload' || view === 'analysis' || view === 'phenotyping' || view === 'settings';
 
 export default function App() {
   const [view, setView] = useState<ViewState>('upload');
   const [taskId, setTaskId] = useState<string | null>(null);
-  const [results, setResults] = useState<any>(null);
-
   useEffect(() => {
     const handleViewChange = (e: any) => {
-      if (e.detail) setView(e.detail);
+      if (isViewState(e.detail)) setView(e.detail);
     };
     window.addEventListener('change-view', handleViewChange);
     return () => window.removeEventListener('change-view', handleViewChange);
@@ -30,6 +31,59 @@ export default function App() {
   const handleUploadComplete = (id: string) => {
     setTaskId(id);
     setView('analysis');
+  };
+
+  const renderView = () => {
+    switch (view) {
+      case 'upload':
+        return (
+          <motion.div
+            key="upload"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="p-8"
+          >
+            <UploadPanel onComplete={handleUploadComplete} />
+          </motion.div>
+        );
+      case 'analysis':
+        return (
+          <motion.div
+            key="analysis"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="h-full"
+          >
+            <Dashboard taskId={taskId!} />
+          </motion.div>
+        );
+      case 'phenotyping':
+        return (
+          <motion.div
+            key="phenotyping"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="h-full"
+          >
+            <PhenotypingView />
+          </motion.div>
+        );
+      case 'settings':
+        return (
+          <motion.div
+            key="settings"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="p-8"
+          >
+            <SettingsView />
+          </motion.div>
+        );
+    }
   };
 
   return (
@@ -68,7 +122,7 @@ export default function App() {
                 !taskId && "opacity-20 cursor-not-allowed"
               )}
             >
-              Analiz Vizualizasyonu
+              Analiz
             </button>
             <button 
               onClick={() => setView('phenotyping')}
@@ -81,15 +135,6 @@ export default function App() {
                 <Microscope size={12} />
                 Fenotipleme
               </span>
-            </button>
-            <button
-              onClick={() => setView('azolla-rgb')}
-              className={cn(
-                "px-5 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all",
-                view === 'azolla-rgb' ? "bg-teal-100 text-teal-700 shadow-inner" : "text-slate-400 hover:text-teal-600 hover:bg-teal-50"
-              )}
-            >
-              Azolla-RGB Sistem
             </button>
             <button 
               onClick={() => setView('settings')}
@@ -128,47 +173,7 @@ export default function App() {
         view === 'analysis' || view === 'phenotyping' ? "w-full" : "max-w-[1400px]"
       )}>
         <AnimatePresence mode="wait">
-          {view === 'upload' ? (
-            <motion.div
-              key="upload"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="p-8"
-            >
-              <UploadPanel onComplete={handleUploadComplete} />
-            </motion.div>
-          ) : view === 'analysis' ? (
-            <motion.div
-              key="analysis"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="h-full"
-            >
-              <Dashboard taskId={taskId!} />
-            </motion.div>
-          ) : view === 'phenotyping' || view === 'azolla-rgb' ? (
-            <motion.div
-              key="phenotyping"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="h-full"
-            >
-              <PhenotypingView />
-            </motion.div>
-          ) : (
-            <motion.div
-              key="settings"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="p-8"
-            >
-              <SettingsView />
-            </motion.div>
-          )}
+          {renderView()}
         </AnimatePresence>
       </main>
     </div>
