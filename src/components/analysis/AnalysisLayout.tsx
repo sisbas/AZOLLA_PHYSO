@@ -159,8 +159,8 @@ function DecisionPanel({ model }: { model: any }) {
 function AnalysisTab({ model }: { model: any }) {
   return (
     <motion.div key="analysis" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="flex flex-col gap-6">
-      <div className="grid grid-cols-1 xl:grid-cols-4 gap-6 flex-1 min-h-[56vh] xl:min-h-[clamp(620px,72vh,940px)]">
-        <div className="xl:col-span-3 flex flex-col gap-4 min-h-0">
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px] gap-6 flex-1 min-h-[56vh] xl:min-h-[clamp(620px,72vh,940px)]">
+        <div className="flex flex-col gap-4 min-h-0">
           <TopMetricsRow model={model} />
           <div className="min-h-[360px] h-[clamp(360px,58vh,820px)]">
             <ImageViewer model={model} />
@@ -216,14 +216,38 @@ function AnalysisTab({ model }: { model: any }) {
 }
 
 export function AnalysisLayout({ model }: { model: any }) {
+  const tabs = [
+    { key: 'analysis', label: 'Kare Analizi' },
+    { key: 'stats', label: 'Batch İstatistikleri' },
+    { key: 'insights', label: 'Bilimsel Yorum' },
+  ];
+
   return (
-    <div className="grid grid-cols-12 h-screen overflow-hidden bg-[#f8fafc] scientific-grid">
-      <AnalysisSidebar model={model} />
-      <main className="col-span-9 lg:col-span-10 p-6 flex flex-col gap-6 overflow-y-auto">
+    <div className="min-h-[calc(100vh-64px)] bg-[#f8fafc] scientific-grid">
+      <div className="lg:hidden px-4 sm:px-6 lg:px-8 pt-4">
+        <nav className="flex items-center gap-2 overflow-x-auto pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {tabs.map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => model.setActiveTab(tab.key)}
+              className={cn(
+                'shrink-0 rounded-xl px-4 py-2 text-xs font-bold transition-colors',
+                model.activeTab === tab.key ? 'bg-slate-900 text-white shadow-lg' : 'bg-white text-slate-600 border border-slate-200'
+              )}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </nav>
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-12 h-full">
+        <AnalysisSidebar model={model} />
+        <main className="col-span-1 lg:col-span-10 px-4 sm:px-6 lg:px-8 py-6 flex flex-col gap-6 overflow-y-auto">
         <AnimatePresence mode="wait">
           {model.activeTab === 'analysis' ? <AnalysisTab model={model} /> : model.activeTab === 'insights' ? <InsightsView model={model} /> : <BatchStatsView model={model} />}
         </AnimatePresence>
-      </main>
+        </main>
+      </div>
     </div>
   );
 }

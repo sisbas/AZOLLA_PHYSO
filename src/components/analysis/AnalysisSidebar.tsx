@@ -7,7 +7,7 @@ export function AnalysisSidebar({ model }: { model: any }) {
   const { currentFrame, activeTab, setActiveTab } = model;
 
   return (
-    <aside className="col-span-3 lg:col-span-2 border-r border-[#e2e8f0] flex flex-col bg-white/80 backdrop-blur-md p-5 gap-6 overflow-y-auto">
+    <aside className="hidden lg:flex lg:col-span-2 border-r border-[#e2e8f0] flex-col bg-white/80 backdrop-blur-md p-5 gap-6 overflow-y-auto">
       <div className="space-y-4">
         <div className="flex items-center gap-2 mb-2">
           <Database size={14} className="text-primary" />
