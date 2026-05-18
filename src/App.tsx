@@ -170,7 +170,7 @@ export default function App() {
 
       <main className={cn(
         "mx-auto min-h-[calc(100vh-64px)]",
-        view === 'analysis' || view === 'phenotyping' ? "w-full" : "max-w-[1400px]"
+        view === 'analysis' || view === 'phenotyping' ? "w-full max-w-[1800px] px-4 sm:px-6 lg:px-8" : "max-w-[1400px] px-4 sm:px-6 lg:px-8"
       )}>
         <AnimatePresence mode="wait">
           {renderView()}
