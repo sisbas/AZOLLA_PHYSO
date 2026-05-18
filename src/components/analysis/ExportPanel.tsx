@@ -1,12 +1,13 @@
 import { Download, Layers } from 'lucide-react';
 import { cn } from '../../App';
 import { analysisTypography } from './typography';
+import { analysisCardTokens } from './visualTokens';
 
 export function ExportPanel({ model }: { model: any }) {
   const { setViewMode, handleDownload, downloadCsv } = model;
 
   return (
-    <div className="bg-slate-900 text-white rounded-2xl p-6 space-y-6 shadow-2xl relative overflow-hidden">
+    <div className={cn(analysisCardTokens.base, 'bg-slate-900 border-slate-800 text-white p-6 space-y-6 relative overflow-hidden')}>
       <div className="absolute inset-0 pointer-events-none opacity-20 scientific-grid" />
       <div className="space-y-4 relative">
         <div className="flex items-center gap-2">
@@ -34,7 +35,7 @@ export function ExportPanel({ model }: { model: any }) {
           ))}
         </div>
       </div>
-      <button onClick={downloadCsv} className="w-full bg-[#10b981] hover:bg-emerald-600 text-white text-xs font-bold py-4 rounded-xl flex items-center justify-center gap-3 transition-all relative z-10 shadow-lg shadow-emerald-900/40">
+      <button onClick={downloadCsv} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-4 rounded-xl flex items-center justify-center gap-3 transition-all relative z-10">
         <Layers size={14} /> Tüm batch raporunu (CSV) indir
       </button>
     </div>
