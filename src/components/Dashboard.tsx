@@ -1053,8 +1053,8 @@ export default function Dashboard({ taskId }: DashboardProps) {
 
   if (error || !data || !data.timeline || data.timeline.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[500px] gap-6 p-8 text-center bg-slate-50/50 rounded-[40px] border-2 border-dashed border-slate-200 m-8">
-        <div className="w-20 h-20 bg-white rounded-3xl flex items-center justify-center text-rose-500 shadow-2xl shadow-rose-100 ring-8 ring-rose-50">
+      <div className="flex flex-col items-center justify-center min-h-[500px] gap-6 p-8 text-center bg-slate-50/50 rounded-3xl border-2 border-dashed border-slate-200 m-8">
+        <div className="w-20 h-20 bg-white rounded-3xl flex items-center justify-center text-rose-500 shadow-sm ring-8 ring-rose-50">
            <AlertCircle size={40} />
         </div>
         <div className="space-y-2">
@@ -1066,7 +1066,7 @@ export default function Dashboard({ taskId }: DashboardProps) {
         <div className="flex items-center gap-3">
           <button 
             onClick={() => window.location.reload()}
-            className="px-10 py-4 bg-slate-900 text-white rounded-2xl text-sm font-bold hover:bg-slate-800 transition-all shadow-2xl active:scale-95"
+            className="px-10 py-4 bg-slate-900 text-white rounded-2xl text-sm font-bold hover:bg-slate-800 transition-all shadow-sm active:scale-95"
           >
             Yeniden Dene
           </button>

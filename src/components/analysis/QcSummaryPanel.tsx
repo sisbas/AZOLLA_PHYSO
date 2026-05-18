@@ -2,6 +2,7 @@ import { motion } from 'motion/react';
 import { CheckCircle2, ListChecks } from 'lucide-react';
 import { cn } from '../../App';
 import { analysisTypography } from './typography';
+import { analysisCardTokens, analysisStateTokens } from './visualTokens';
 
 export function QcSummaryPanel({ model }: { model: any }) {
   const { currentFrame, qcRows, qcHasDetailedData, qcSummary, qcStatusNotes, errorSeverityEntries } = model;
@@ -10,7 +11,7 @@ export function QcSummaryPanel({ model }: { model: any }) {
     <motion.div
       initial={{ scale: 0.95, opacity: 0 }}
       animate={{ scale: 1, opacity: 1 }}
-      className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xl shadow-slate-200/40 relative overflow-hidden"
+      className={cn(analysisCardTokens.base, 'p-6 relative overflow-hidden')}
     >
       <div className="absolute top-0 right-0 p-4 opacity-[0.04]"><ListChecks size={86} /></div>
       <div className="relative flex items-start justify-between gap-3 mb-5">
@@ -23,9 +24,9 @@ export function QcSummaryPanel({ model }: { model: any }) {
         </div>
         <span className={cn(
           'px-3 py-1.5 rounded-full border text-xs font-black shrink-0',
-          qcSummary.level === 'reliable' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' :
-            qcSummary.level === 'warning' ? 'bg-amber-50 text-amber-700 border-amber-100' :
-              'bg-rose-50 text-rose-700 border-rose-100'
+          qcSummary.level === 'reliable' ? analysisStateTokens.success :
+            qcSummary.level === 'warning' ? analysisStateTokens.warning :
+              analysisStateTokens.danger
         )}>
           {qcSummary.label}
         </span>
@@ -57,7 +58,7 @@ export function QcSummaryPanel({ model }: { model: any }) {
           const text = typeof note === 'string' ? note : note.text;
           const level = typeof note === 'string' ? 'ok' : note.level;
           return (
-            <div key={index} className={cn('p-3 rounded-xl border text-sm font-semibold flex gap-2', level === 'ok' ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : level === 'warning' ? 'bg-amber-50 border-amber-100 text-amber-700' : 'bg-rose-50 border-rose-100 text-rose-700')}>
+            <div key={index} className={cn('p-3 rounded-xl border text-sm font-semibold flex gap-2', level === 'ok' ? analysisStateTokens.success : level === 'warning' ? analysisStateTokens.warning : analysisStateTokens.danger)}>
               <CheckCircle2 size={13} className="shrink-0 mt-0.5" />
               <span>{text}</span>
             </div>
@@ -96,7 +97,7 @@ export function QcSummaryPanel({ model }: { model: any }) {
               ))}
             </div>
           ) : (
-            <div className="p-3 rounded-xl border border-emerald-100 bg-emerald-50 text-xs font-bold text-emerald-700">
+            <div className={cn('p-3 rounded-xl border text-xs font-bold', analysisStateTokens.success)}>
               Önem düzeyi gruplarında hata kaydı yok.
             </div>
           )}

@@ -1,6 +1,7 @@
 import { motion } from 'motion/react';
 import { Sparkles } from 'lucide-react';
 import { cn } from '../../App';
+import { analysisCardTokens } from './visualTokens';
 
 const viewModeLabels: Record<string, string> = {
   rgb: 'Orijinal',
@@ -13,7 +14,7 @@ export function ImageViewer({ model }: { model: any }) {
   const { currentFrame, currentIndex, setCurrentIndex, data, chartData, viewMode, setViewMode } = model;
 
   return (
-    <div className="lg:col-span-3 bg-white border border-[#e2e8f0] rounded-2xl overflow-hidden flex flex-col shadow-xl shadow-slate-200/50 relative">
+    <div className={cn(analysisCardTokens.base, 'lg:col-span-3 overflow-hidden flex flex-col relative')}>
       <div className="h-[56px] border-b border-slate-100 flex items-center justify-between px-6 bg-white/50 backdrop-blur-sm z-10">
         <div className="flex items-center gap-2">
           <div className="flex bg-slate-100/80 p-1 rounded-xl">
@@ -35,7 +36,7 @@ export function ImageViewer({ model }: { model: any }) {
             className={cn(
               'px-5 py-2 text-xs font-bold rounded-xl transition-all border flex items-center gap-2',
               viewMode === 'isolated'
-                ? 'bg-emerald-600 text-white border-emerald-600 shadow-lg shadow-emerald-200'
+                ? 'bg-emerald-600 text-white border-emerald-600'
                 : 'bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50'
             )}
           >
@@ -90,7 +91,7 @@ export function ImageViewer({ model }: { model: any }) {
           )}
           <div className="absolute top-6 right-6 flex flex-col items-end gap-2 pointer-events-none">
             <div className="bg-slate-900/80 backdrop-blur-md px-3 py-1.5 rounded-lg border border-white/10 flex items-center gap-2">
-              <div className={cn('w-1.5 h-1.5 rounded-full animate-pulse', viewMode === 'rgb' ? 'bg-white' : viewMode === 'pseudo' ? 'bg-rose-500' : 'bg-cyan-400')} />
+              <div className={cn('w-1.5 h-1.5 rounded-full animate-pulse', viewMode === 'rgb' ? 'bg-white' : viewMode === 'pseudo' ? 'bg-rose-500' : 'bg-slate-300')} />
               <span className="text-xs font-bold text-white">{viewModeLabels[viewMode]} aktif</span>
             </div>
           </div>

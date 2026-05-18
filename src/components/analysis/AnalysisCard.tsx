@@ -1,5 +1,6 @@
 import { ReactNode } from 'react';
 import { cn } from '../../App';
+import { analysisCardTokens } from './visualTokens';
 
 interface AnalysisCardProps {
   children: ReactNode;
@@ -9,7 +10,7 @@ interface AnalysisCardProps {
 
 export function AnalysisCard({ children, className }: AnalysisCardProps) {
   return (
-    <div className={cn('rounded-2xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-200/40', className)}>
+    <div className={cn(analysisCardTokens.base, 'p-6', className)}>
       {children}
     </div>
   );
