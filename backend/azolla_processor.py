@@ -43,6 +43,8 @@ class AzollaProcessor:
             "hsv_lower": [35, 40, 40],
             "hsv_upper": [85, 255, 255],
             "morph_kernel_size": (5, 5),
+            "min_component_area": 100,
+            "keep_largest_component_only": False,
             "clahe_clip_limit": 2.0,
             "clahe_grid_size": (8, 8),
             "overlay_opacity": 0.6,
@@ -98,28 +100,27 @@ class AzollaProcessor:
             mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
             mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
 
-            # Keep only the primary Azolla component to suppress dish reflections/noise.
-            num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+            # Component filtering: remove tiny blobs while preserving all valid components.
+            num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
             if num_labels > 1:
-                img_h, img_w = mask.shape[:2]
-                img_center = np.array([img_w / 2.0, img_h / 2.0], dtype=np.float32)
-                best_label = 0
-                best_score = float("-inf")
-
+                min_component_area = int(self.config.get("min_component_area", 100))
+                keep_largest_only = bool(self.config.get("keep_largest_component_only", False))
+                valid_labels: List[int] = []
                 for label in range(1, num_labels):
-                    area = float(stats[label, cv2.CC_STAT_AREA])
-                    if area < 100:
+                    area = int(stats[label, cv2.CC_STAT_AREA])
+                    if area < min_component_area:
                         continue
-                    centroid = centroids[label]
-                    dist = float(np.linalg.norm(centroid - img_center))
-                    # Prefer larger components that are closer to the image center.
-                    score = area - (dist * 20.0)
-                    if score > best_score:
-                        best_score = score
-                        best_label = label
+                    valid_labels.append(label)
 
-                if best_label > 0:
-                    mask = np.where(labels == best_label, 255, 0).astype(np.uint8)
+                if valid_labels:
+                    if keep_largest_only:
+                        best_label = max(valid_labels, key=lambda lbl: int(stats[lbl, cv2.CC_STAT_AREA]))
+                        final_mask = labels == best_label
+                    else:
+                        final_mask = np.isin(labels, valid_labels)
+                    mask = np.where(final_mask, 255, 0).astype(np.uint8)
+                else:
+                    mask = np.zeros_like(mask, dtype=np.uint8)
 
             # Fill small internal holes for cleaner biomass silhouette
             mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((9, 9), np.uint8))
@@ -133,7 +134,7 @@ class AzollaProcessor:
                 logger.warning("Segmentasyon sonucunda hiç Azolla bulunamadı.")
                 # We don't fail here but confidence will be low
             
-            return mask
+            return mask.astype(np.uint8)
         except Exception as e:
             logger.error(f"Segmentation error: {str(e)}")
             raise ProcessingError(f"Segmentasyon hatası: {str(e)}")
