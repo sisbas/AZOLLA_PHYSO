@@ -1,4 +1,5 @@
 import { AnimatePresence, motion } from 'motion/react';
+import type { ReactNode } from 'react';
 import { Activity, AlertCircle } from 'lucide-react';
 import { cn } from '../../App';
 import { AnalysisSidebar } from './AnalysisSidebar';
@@ -10,6 +11,50 @@ import { InsightsView } from './InsightsView';
 import { PhenotypingSummary } from './PhenotypingSummary';
 import { QcSummaryPanel } from './QcSummaryPanel';
 import { analysisTypography } from './typography';
+
+function TopMetricsRow({ model }: { model: any }) {
+  const stressProbability = model.decisionProbability === null ? '—' : `${Math.round(model.decisionProbability * 100)}%`;
+  const coverage = typeof model.currentFrame.metrics?.coverage_pct === 'number'
+    ? `${model.currentFrame.metrics.coverage_pct.toFixed(1)}%`
+    : '—';
+  const frondCount = model.currentFrondCount === null ? '—' : model.currentFrondCount.toFixed(0);
+  const qcLabel = model.qcSummary?.label ?? 'QC bilinmiyor';
+
+  const cards = [
+    { label: 'Stres olasılığı', value: stressProbability },
+    { label: 'Kapsama', value: coverage },
+    { label: 'Frond sayısı', value: frondCount },
+    { label: 'QC durumu', value: qcLabel },
+  ];
+
+  return (
+    <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+      {cards.map((card) => (
+        <div key={card.label} className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+          <p className="text-xs font-semibold text-slate-500">{card.label}</p>
+          <p className="text-lg font-bold text-slate-900 tabular-nums mt-1">{card.value}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CollapsibleCard({ title, description, children, defaultOpen = false }: { title: string; description: string; children: ReactNode; defaultOpen?: boolean }) {
+  return (
+    <details className="bg-white border border-slate-200 rounded-2xl shadow-sm group" open={defaultOpen}>
+      <summary className="list-none cursor-pointer px-5 py-4 flex items-start justify-between gap-4">
+        <div>
+          <h3 className="text-sm font-bold text-slate-800">{title}</h3>
+          <p className="text-xs text-slate-500 mt-1">{description}</p>
+        </div>
+        <span className="text-xs font-semibold text-slate-400 group-open:rotate-180 transition-transform">⌄</span>
+      </summary>
+      <div className="px-5 pb-5">
+        {children}
+      </div>
+    </details>
+  );
+}
 
 function DecisionPanel({ model }: { model: any }) {
   const {
@@ -114,16 +159,58 @@ function DecisionPanel({ model }: { model: any }) {
 function AnalysisTab({ model }: { model: any }) {
   return (
     <motion.div key="analysis" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="flex flex-col gap-6">
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 flex-1 max-h-[70vh]">
-        <ImageViewer model={model} />
-        <div className="flex flex-col gap-6">
-          <DecisionPanel model={model} />
-          <QcSummaryPanel model={model} />
-          <ExportPanel model={model} />
+      <div className="grid grid-cols-1 xl:grid-cols-4 gap-6 flex-1 min-h-[56vh] xl:min-h-[clamp(620px,72vh,940px)]">
+        <div className="xl:col-span-3 flex flex-col gap-4 min-h-0">
+          <TopMetricsRow model={model} />
+          <div className="min-h-[360px] h-[clamp(360px,58vh,820px)]">
+            <ImageViewer model={model} />
+          </div>
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+            <p className="text-xs font-semibold text-slate-500">Seçili frame özeti</p>
+            <p className="mt-2 text-sm text-slate-700">
+              {model.currentFrame?.decision?.rationale ?? 'Karar özeti bulunamadı.'}
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-col gap-4">
+          <CollapsibleCard title="QC detayları" description="Kalite metrikleri ve doğrulama notları" defaultOpen>
+            <QcSummaryPanel model={model} />
+          </CollapsibleCard>
+          <CollapsibleCard title="Export modülü" description="CSV/rapor çıktı seçenekleri">
+            <ExportPanel model={model} />
+          </CollapsibleCard>
+          <CollapsibleCard title="Hata grupları" description="Severity bazlı hata dağılımı">
+            {model.errorSeverityEntries.length === 0 ? (
+              <p className="text-sm text-slate-500">Hata kaydı yok.</p>
+            ) : (
+              <div className="space-y-2">
+                {model.errorSeverityEntries.map(([severity, rows]: [string, any[]]) => (
+                  <div key={severity} className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2 text-sm">
+                    <span className="font-semibold text-slate-700 uppercase">{severity}</span>
+                    <span className="tabular-nums text-slate-500">{rows.length}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CollapsibleCard>
+          <CollapsibleCard title="Teknik pipeline" description="Karar katkıları ve model sinyalleri">
+            <DecisionPanel model={model} />
+          </CollapsibleCard>
         </div>
       </div>
-      <FrameComparisonPanel model={model} />
-      <PhenotypingSummary model={model} />
+      <section className="space-y-3">
+        <h2 className="text-base font-bold text-slate-800">Karşılaştırma paneli</h2>
+        <FrameComparisonPanel model={model} />
+      </section>
+      <section className="space-y-3">
+        <h2 className="text-base font-bold text-slate-800">Fenotipleme</h2>
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+          <p className="text-sm text-slate-600">Özet: kapsama, stres ve biyokütle metrikleri ana panelde özetlenir.</p>
+        </div>
+        <CollapsibleCard title="Detay" description="Yoğunluk dağılımı ve ikincil grafikler (varsayılan kapalı)">
+          <PhenotypingSummary model={model} />
+        </CollapsibleCard>
+      </section>
     </motion.div>
   );
 }
