@@ -182,8 +182,9 @@ export default function PhenotypingView() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [poolArea, setPoolArea] = useState(String(DEFAULT_POOL_AREA_M2));
-  const [segmentationMask, setSegmentationMask] = useState<string | null>(null);
-  const [densityMap, setDensityMap] = useState<string | null>(null);
+  const [binaryMaskPng, setBinaryMaskPng] = useState<string | null>(null);
+  const [isolatedRgbPng, setIsolatedRgbPng] = useState<string | null>(null);
+  const [overlayPng, setOverlayPng] = useState<string | null>(null);
   const [mode, setMode] = useState<'single' | 'batch'>('single');
 
   const handleAnalyze = async (file: File) => {
@@ -206,8 +207,9 @@ export default function PhenotypingView() {
       }
       const result = await res.json();
       setData(result);
-      setSegmentationMask(result.images?.segmentasyon_maskesi ?? null);
-      setDensityMap(result.images?.yogunluk_haritasi ?? null);
+      setBinaryMaskPng(result.images?.binary_mask_png ?? null);
+      setIsolatedRgbPng(result.images?.isolated_rgb_png ?? null);
+      setOverlayPng(result.images?.overlay_png ?? null);
     } catch (err: any) {
       setError(err.message || 'Analiz sırasında hata oluştu');
     } finally {
@@ -395,10 +397,27 @@ export default function PhenotypingView() {
 
         {/* Segmentasyon ve Alan Metrikleri */}
         <div className="mb-8">
-          {(segmentationMask || densityMap) && (
+          {binaryMaskPng && (
+            <div className="mb-6">
+              <h3 className="text-xs font-black uppercase tracking-widest text-slate-600 mb-2">Segmentasyon maskesi</h3>
+              <img src={binaryMaskPng} alt="Segmentasyon maskesi (binary)" className="rounded-2xl border border-slate-200 bg-white" />
+              <p className="mt-2 text-xs text-slate-500">Mask = binary; Isolated = masked RGB</p>
+            </div>
+          )}
+          {(isolatedRgbPng || overlayPng) && (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
-              {segmentationMask && <img src={segmentationMask} alt="Segmentasyon maskesi" className="rounded-2xl border border-slate-200 bg-white" />}
-              {densityMap && <img src={densityMap} alt="Yoğunluk haritası" className="rounded-2xl border border-slate-200 bg-white" />}
+              {isolatedRgbPng && (
+                <div>
+                  <h3 className="text-xs font-black uppercase tracking-widest text-slate-600 mb-2">İzole RGB (Masked RGB)</h3>
+                  <img src={isolatedRgbPng} alt="İzole RGB (mask uygulanmış)" className="rounded-2xl border border-slate-200 bg-white" />
+                </div>
+              )}
+              {overlayPng && (
+                <div>
+                  <h3 className="text-xs font-black uppercase tracking-widest text-slate-600 mb-2">Overlay (Yarı saydam maske)</h3>
+                  <img src={overlayPng} alt="Overlay (orijinal + yarı saydam maske)" className="rounded-2xl border border-slate-200 bg-white" />
+                </div>
+              )}
             </div>
           )}
           <div className="flex items-center gap-2 mb-4">

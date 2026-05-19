@@ -11,7 +11,7 @@ import numpy as np
 
 from backend.logger import get_logger
 from backend.core.phenotyping import PhenotypingModule
-from backend.core.segmenter_interface import DefaultSegmenter, density_map
+from backend.core.segmenter_interface import DefaultSegmenter
 
 logger = get_logger("phenotyping")
 
@@ -77,7 +77,19 @@ class AzollaPhenotypingService:
             preprocessed = self._sharpen(step3)
             rgb = cv2.cvtColor(preprocessed, cv2.COLOR_BGR2RGB)
             mask, qc, _ = self.segmenter.process(rgb)
-            density_img, _ = density_map(mask)
+            binary_mask = np.where(mask > 0, 255, 0).astype(np.uint8)
+            isolated_rgb = cv2.bitwise_and(rgb, rgb, mask=binary_mask)
+            overlay_rgb = rgb.copy()
+            overlay_color = np.zeros_like(rgb)
+            overlay_color[:, :, 1] = 255
+            overlay_alpha = 0.35
+            overlay_rgb[binary_mask > 0] = cv2.addWeighted(
+                rgb[binary_mask > 0],
+                1.0 - overlay_alpha,
+                overlay_color[binary_mask > 0],
+                overlay_alpha,
+                0,
+            )
 
             # Endpoint consistency guard: same input should produce similar coverage semantics
             measured_coverage = float(np.mean(mask > 0) * 100.0)
@@ -94,8 +106,9 @@ class AzollaPhenotypingService:
             result = self.phenotyping.to_dict(metrics)
             result["timestamp"] = datetime.utcnow().isoformat()
             result["images"] = {
-                "segmentasyon_maskesi": self._png_base64(mask),
-                "yogunluk_haritasi": self._png_base64(density_img),
+                "binary_mask_png": self._png_base64(binary_mask),
+                "isolated_rgb_png": self._png_base64(isolated_rgb),
+                "overlay_png": self._png_base64(overlay_rgb),
             }
 
             logger.info("Phenotyping analysis completed successfully")
