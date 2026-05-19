@@ -187,6 +187,35 @@ export default function PhenotypingView() {
   const [overlayPng, setOverlayPng] = useState<string | null>(null);
   const [mode, setMode] = useState<'single' | 'batch'>('single');
 
+  const downloadReport = () => {
+    if (!data) return;
+
+    const reportPayload = {
+      report_type: 'azolla_phenotyping',
+      generated_at: new Date().toISOString(),
+      mode,
+      pool_area_m2: Number(poolArea),
+      metrics: data,
+      images: {
+        binary_mask_png: binaryMaskPng,
+        isolated_rgb_png: isolatedRgbPng,
+        overlay_png: overlayPng,
+      },
+    };
+
+    const blob = new Blob([JSON.stringify(reportPayload, null, 2)], {
+      type: 'application/json;charset=utf-8',
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `azolla_phenotyping_report_${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   const handleAnalyze = async (file: File) => {
     const parsedPoolArea = Number(poolArea);
     if (!Number.isFinite(parsedPoolArea) || parsedPoolArea <= 0) {
@@ -359,7 +388,16 @@ export default function PhenotypingView() {
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <button className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-700 text-xs font-bold uppercase tracking-widest rounded-xl hover:bg-slate-200 transition-colors">
+              <button
+                onClick={downloadReport}
+                disabled={!data}
+                className={cn(
+                  'flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase tracking-widest rounded-xl transition-colors',
+                  data
+                    ? 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                )}
+              >
                 <Download size={14} />
                 Rapor İndir
               </button>
