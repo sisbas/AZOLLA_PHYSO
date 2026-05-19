@@ -65,22 +65,28 @@ const timestampForFile = (file: File) => {
 };
 
 export default function UploadPanel({ onComplete }: UploadPanelProps) {
-  const [files, setFiles] = useState<File[]>([]);
+  const [firstDateFiles, setFirstDateFiles] = useState<File[]>([]);
+  const [secondDateFiles, setSecondDateFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [pipelineStage, setPipelineStage] = useState<string>('queued');
   const [currentFile, setCurrentFile] = useState<string>('');
   const [error, setError] = useState<{ message: string; remediation?: string } | null>(null);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      setFiles(Array.from(e.target.files));
-      setError(null);
+  const handleFileChange = (target: 'first' | 'second') => (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files) return;
+
+    const selectedFiles = Array.from(e.target.files);
+    if (target === 'first') {
+      setFirstDateFiles(selectedFiles);
+    } else {
+      setSecondDateFiles(selectedFiles);
     }
+    setError(null);
   };
 
   const uploadFiles = async () => {
-    if (files.length === 0) return;
+    if (firstDateFiles.length === 0 || secondDateFiles.length === 0) return;
     setIsUploading(true);
     setError(null);
     
@@ -92,9 +98,15 @@ export default function UploadPanel({ onComplete }: UploadPanelProps) {
     }
     
     const formData = new FormData();
-    files.forEach(f => {
-      formData.append('images', f);
-      formData.append('timestamps', timestampForFile(f));
+    const orderedFiles = [
+      ...firstDateFiles.map((file) => ({ file, group: 'first_date' })),
+      ...secondDateFiles.map((file) => ({ file, group: 'second_date' })),
+    ].sort((a, b) => timestampForFile(a.file).localeCompare(timestampForFile(b.file)));
+
+    orderedFiles.forEach(({ file, group }) => {
+      formData.append('images', file);
+      formData.append('timestamps', timestampForFile(file));
+      formData.append('groups', group);
     });
     formData.append('experiment_id', `EXP-${Date.now()}`);
 
@@ -195,7 +207,7 @@ export default function UploadPanel({ onComplete }: UploadPanelProps) {
             <h2 className="text-3xl font-black tracking-tighter text-slate-900 uppercase">Veri Giriş Portalı</h2>
           </div>
         </div>
-        <p className="text-sm text-slate-500 font-medium">Fizyolojik stres analizi için RGB zaman serisini (Z-Stack) sisteme aktarın.</p>
+        <p className="text-sm text-slate-500 font-medium">İki farklı tarihte toplanan doku örneklerini yükleyerek biyolojik progresyonu karşılaştırın.</p>
         <div className="absolute -top-10 -right-10 w-40 h-40 bg-primary/5 rounded-full blur-3xl pointer-events-none" />
       </div>
 
@@ -221,36 +233,38 @@ export default function UploadPanel({ onComplete }: UploadPanelProps) {
       </div>
 
       <div className={cn(
-        "bg-white/80 backdrop-blur-md border border-slate-200 rounded-2xl p-12 flex flex-col items-center justify-center gap-8 transition-all shadow-xl shadow-slate-200/50 group relative overflow-hidden",
-        files.length > 0 ? "ring-2 ring-slate-900 border-transparent" : "hover:border-primary/50"
+        "bg-white/80 backdrop-blur-md border border-slate-200 rounded-2xl p-8 md:p-12 transition-all shadow-xl shadow-slate-200/50 group relative overflow-hidden",
+        firstDateFiles.length > 0 || secondDateFiles.length > 0 ? "ring-2 ring-slate-900 border-transparent" : "hover:border-primary/50"
       )}>
         <div className="absolute inset-0 opacity-[0.03] scientific-grid pointer-events-none" />
-        <input 
-          type="file" 
-          multiple 
-          onChange={handleFileChange} 
-          className="hidden" 
-          id="file-upload" 
-          disabled={isUploading}
-        />
-        <label 
-          htmlFor="file-upload"
-          className="cursor-pointer flex flex-col items-center gap-6"
-        >
-          <div className="w-20 h-20 rounded-2xl bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-400 group-hover:scale-110 group-hover:rotate-3 transition-all shadow-sm">
-            <Upload size={32} />
-          </div>
-          <div className="text-center space-y-2">
-            <span className="text-sm font-bold text-slate-800 tracking-tight block">Dataset Seçimi İçin Buraya Tıklayın</span>
-            <div className="flex gap-2 justify-center">
-              <span className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded text-[9px] font-bold uppercase">TIFF/RAW</span>
-              <span className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded text-[9px] font-bold uppercase">PNG/JPG</span>
-            </div>
-          </div>
-        </label>
+        <div className="grid gap-6 md:grid-cols-2">
+          {[
+            { key: 'first', label: 'İlk tarih doku örneği', sub: 'Referans başlangıç ölçümü', id: 'first-date-upload' },
+            { key: 'second', label: 'İkinci tarih doku örneği', sub: 'Takip ölçümü (stres progresyonu)', id: 'second-date-upload' },
+          ].map((slot) => (
+            <label key={slot.id} htmlFor={slot.id} className="cursor-pointer rounded-2xl border border-slate-200 bg-white p-6 flex flex-col items-center gap-5 hover:border-emerald-300 transition-colors">
+              <input
+                type="file"
+                multiple
+                onChange={handleFileChange(slot.key as 'first' | 'second')}
+                className="hidden"
+                id={slot.id}
+                disabled={isUploading}
+              />
+              <div className="w-16 h-16 rounded-2xl bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-400 shadow-sm">
+                <Upload size={28} />
+              </div>
+              <div className="text-center">
+                <p className="text-sm font-bold text-slate-800 tracking-tight">{slot.label}</p>
+                <p className="text-xs text-slate-500 mt-1">{slot.sub}</p>
+              </div>
+              <div className="text-[10px] font-semibold text-slate-500">TIFF/RAW · PNG/JPG</div>
+            </label>
+          ))}
+        </div>
       </div>
 
-      {files.length > 0 && (
+      {(firstDateFiles.length > 0 || secondDateFiles.length > 0) && (
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -259,7 +273,7 @@ export default function UploadPanel({ onComplete }: UploadPanelProps) {
           <div className="flex items-center justify-between pb-6 border-b border-slate-50">
             <div className="flex flex-col">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none mb-1">Batch Meta</span>
-              <span className="font-black text-sm text-slate-900 uppercase tracking-tighter">{files.length} Kayıt Sırada</span>
+              <span className="font-black text-sm text-slate-900 uppercase tracking-tighter">{firstDateFiles.length + secondDateFiles.length} Kayıt Sırada</span>
             </div>
             {isUploading ? (
               <div className="flex items-center gap-3 px-4 py-2 bg-slate-900 text-white rounded-xl shadow-lg shadow-black/10 transition-all">
@@ -272,7 +286,7 @@ export default function UploadPanel({ onComplete }: UploadPanelProps) {
                 className="group relative bg-[#10b981] text-white px-8 py-3 rounded-xl text-[11px] font-bold uppercase tracking-widest hover:bg-emerald-600 transition-all shadow-xl shadow-emerald-200 overflow-hidden"
               >
                 <span className="relative z-10 flex items-center gap-3">
-                  Sekans Analizini Başlat <CheckCircle2 size={16} />
+                  Tarihsel Doku Karşılaştırmasını Başlat <CheckCircle2 size={16} />
                 </span>
                 <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform" />
               </button>
@@ -280,7 +294,10 @@ export default function UploadPanel({ onComplete }: UploadPanelProps) {
           </div>
           
           <div className="space-y-2 max-h-56 overflow-y-auto pr-3 scrollbar-thin scrollbar-thumb-slate-200">
-            {files.map((file, i) => {
+            {[
+              ...firstDateFiles.map((file) => ({ file, group: 'İlk Tarih' })),
+              ...secondDateFiles.map((file) => ({ file, group: 'İkinci Tarih' })),
+            ].map(({ file, group }, i) => {
               const dateMetadata = fileDateMetadata(file);
 
               return (
@@ -290,6 +307,7 @@ export default function UploadPanel({ onComplete }: UploadPanelProps) {
                       <FileCode size={14} />
                     </div>
                     <div className="min-w-0 space-y-1">
+                      <span className="inline-flex items-center rounded-full bg-slate-900 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-white">{group}</span>
                       <span className="block truncate text-xs font-bold text-slate-700 sm:max-w-[240px]">{file.name}</span>
                       {dateMetadata.detectedDate ? (
                         <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-emerald-700">
