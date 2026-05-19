@@ -10,6 +10,7 @@ from skimage.morphology import binary_closing, disk, remove_small_objects, binar
 from skimage.exposure import equalize_hist, rescale_intensity
 
 from .errors import format_error, ProcessingContext, PipelineStepError
+from .segmenter_interface import standardize_mask, density_map
 
 @dataclass
 class SegQC:
@@ -314,11 +315,13 @@ class SegmentationModule:
                 health_score = 0.0
             
             # 8. Generate visualization outputs
-            mask_uint8 = (mask_combined * 255).astype(np.uint8)
+            mask_uint8 = standardize_mask((mask_combined * 255).astype(np.uint8))
             
             # Result image (segmented area only)
             result = cv2.bitwise_and(img_gamma, img_gamma, mask=mask_uint8)
             
+            density_img, density_stats = density_map(mask_uint8)
+
             # Heatmap from TREx
             trex_normalized = ((trex - trex.min()) / (trex.max() - trex.min() + 1e-6) * 255).astype(np.uint8)
             heatmap = cv2.applyColorMap(trex_normalized, cv2.COLORMAP_JET)
@@ -364,6 +367,17 @@ class SegmentationModule:
                 "exrUrl": self.array_to_base64(indices['ExR']),
                 "trexUrl": self.array_to_base64(indices['TREx']),
                 "regions": regions,
+                "images": {
+                    "segmentasyon_maskesi": "data:image/png;base64," + self.array_to_base64(mask_uint8),
+                    "yogunluk_haritasi": "data:image/png;base64," + self.array_to_base64(density_img),
+                },
+                "coverageConsistency": {
+                    "measuredCoveragePct": coverage,
+                    "densityLowPct": density_stats["low"],
+                    "densityMediumPct": density_stats["medium"],
+                    "densityHighPct": density_stats["high"],
+                    "withinExpectedRange": 0.0 <= coverage <= 100.0,
+                },
                 "methodUsed": method_used,
                 "contrastScore": contrast_score
             }
