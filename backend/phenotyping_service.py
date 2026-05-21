@@ -106,6 +106,7 @@ class AzollaPhenotypingService:
             result = self.phenotyping.to_dict(metrics)
             result["timestamp"] = datetime.utcnow().isoformat()
             result["images"] = {
+                "preprocessed_rgb_png": self._png_base64(rgb),
                 "binary_mask_png": self._png_base64(binary_mask),
                 "isolated_rgb_png": self._png_base64(isolated_rgb),
                 "overlay_png": self._png_base64(overlay_rgb),
