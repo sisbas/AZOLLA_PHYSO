@@ -182,6 +182,7 @@ export default function PhenotypingView() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [poolArea, setPoolArea] = useState(String(DEFAULT_POOL_AREA_M2));
+  const [preprocessedRgbPng, setPreprocessedRgbPng] = useState<string | null>(null);
   const [binaryMaskPng, setBinaryMaskPng] = useState<string | null>(null);
   const [isolatedRgbPng, setIsolatedRgbPng] = useState<string | null>(null);
   const [overlayPng, setOverlayPng] = useState<string | null>(null);
@@ -197,6 +198,7 @@ export default function PhenotypingView() {
       pool_area_m2: Number(poolArea),
       metrics: data,
       images: {
+        preprocessed_rgb_png: preprocessedRgbPng,
         binary_mask_png: binaryMaskPng,
         isolated_rgb_png: isolatedRgbPng,
         overlay_png: overlayPng,
@@ -236,6 +238,7 @@ export default function PhenotypingView() {
       }
       const result = await res.json();
       setData(result);
+      setPreprocessedRgbPng(result.images?.preprocessed_rgb_png ?? null);
       setBinaryMaskPng(result.images?.binary_mask_png ?? null);
       setIsolatedRgbPng(result.images?.isolated_rgb_png ?? null);
       setOverlayPng(result.images?.overlay_png ?? null);
@@ -435,6 +438,12 @@ export default function PhenotypingView() {
 
         {/* Segmentasyon ve Alan Metrikleri */}
         <div className="mb-8">
+          {preprocessedRgbPng && (
+            <div className="mb-6">
+              <h3 className="text-xs font-black uppercase tracking-widest text-slate-600 mb-2">İşlenmiş Görsel (Preprocessed)</h3>
+              <img src={preprocessedRgbPng} alt="İşlenmiş görsel (preprocessed RGB)" className="rounded-2xl border border-slate-200 bg-white" />
+            </div>
+          )}
           {binaryMaskPng && (
             <div className="mb-6">
               <h3 className="text-xs font-black uppercase tracking-widest text-slate-600 mb-2">Segmentasyon maskesi</h3>
