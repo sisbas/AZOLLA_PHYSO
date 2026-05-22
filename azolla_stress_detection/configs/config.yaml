@@ -15,6 +15,13 @@ image_processing:
   target_height: 480
   color_space: "RGB"  # RGB or BGR
   
+# Distance Normalization
+distance_normalization:
+  enabled: false
+  target_distance_cm: 25.0
+  min_scale: 0.6
+  max_scale: 1.8
+
 # Segmentation Parameters
 segmentation:
   method: "adaptive_threshold"  # adaptive_threshold, otsu, unet
