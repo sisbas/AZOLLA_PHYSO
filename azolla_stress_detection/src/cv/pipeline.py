@@ -18,6 +18,7 @@ from dataclasses import dataclass
 
 from .segmentation import segment_azolla, compute_segmentation_metrics, quality_check
 from .features import extract_features
+from .normalization import normalize_by_distance
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +56,10 @@ class ImageProcessingPipeline:
         min_area_ratio: float = 0.01,
         max_area_ratio: float = 0.95,
         include_texture: bool = True,
-        include_color_space: bool = True
+        include_color_space: bool = True,
+        normalize_distance: bool = False,
+        target_distance_cm: Optional[float] = None,
+        capture_distances_cm: Optional[Dict[str, float]] = None
     ):
         """
         Initialize the processing pipeline.
@@ -80,6 +84,9 @@ class ImageProcessingPipeline:
         self.max_area_ratio = max_area_ratio
         self.include_texture = include_texture
         self.include_color_space = include_color_space
+        self.normalize_distance = normalize_distance
+        self.target_distance_cm = target_distance_cm
+        self.capture_distances_cm = capture_distances_cm or {}
         
         self.results: List[ProcessingResult] = []
     
@@ -104,7 +111,15 @@ class ImageProcessingPipeline:
         # Resize to target size
         if image.shape[:2] != (self.target_size[1], self.target_size[0]):
             image = cv2.resize(image, self.target_size, interpolation=cv2.INTER_AREA)
-        
+
+        if self.normalize_distance:
+            distance_cm = self.capture_distances_cm.get(str(filepath))
+            image, _ = normalize_by_distance(
+                image,
+                capture_distance_cm=distance_cm,
+                target_distance_cm=self.target_distance_cm
+            )
+
         return image
     
     def parse_metadata(self, filepath: str) -> Tuple[str, int, int]:
