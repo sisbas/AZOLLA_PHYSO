@@ -70,6 +70,38 @@ class AzollaPipeline:
             self.logger.debug("Running standardization...")
             std_res = self.std.process(img_rgb)
             all_errors.extend(std_res.errors)
+            reference_card_used = bool(
+                std_res.normalization_passed and std_res.illumination_score >= 0.70
+            )
+            capture_metadata = {
+                "gray_white_reference_card_used": reference_card_used,
+                "normalization_passed": std_res.normalization_passed,
+                "illumination_score": std_res.illumination_score,
+                "wb_shift": std_res.wb_shift,
+                "exposure_scale": std_res.exposure_scale,
+            }
+
+            if not std_res.normalization_passed:
+                self.logger.warning(
+                    f"Frame {timestamp} excluded from analysis due to normalization QC fail "
+                    f"(illumination_score={std_res.illumination_score:.3f})"
+                )
+                return {
+                    "timestamp": timestamp,
+                    "metrics": {
+                        "normalization_passed": std_res.normalization_passed,
+                        "illumination_score": std_res.illumination_score,
+                        "wb_shift": std_res.wb_shift,
+                    },
+                    "capture_metadata": capture_metadata,
+                    "phenotyping": {},
+                    "segmentation": {},
+                    "status": "analysis_excluded",
+                    "errors": all_errors,
+                    "image_urls": {
+                        "rgb": f"/media/{experiment_id}/{timestamp.replace(':', '-')}/rgb.png",
+                    }
+                }
             
             # 2. & 3. Segmentation & Optimization (now returns extra outputs)
             self.logger.debug("Running segmentation...")
@@ -118,12 +150,16 @@ class AzollaPipeline:
             results = {
                 "timestamp": timestamp,
                 "metrics": {
+                    "normalization_passed": std_res.normalization_passed,
+                    "illumination_score": std_res.illumination_score,
+                    "wb_shift": std_res.wb_shift,
                     **{k: v for k, v in seg_qc.__dict__.items() if k != 'errors'},
                     **{k: v for k, v in opt_qc.__dict__.items() if k != 'errors'},
                     **{k: v for k, v in frond_qc.items() if k != 'errors'},
                     **ps_metrics,
                     **{k: v for k, v in feature_record.__dict__.items() if k != 'errors'}
                 },
+                "capture_metadata": capture_metadata,
                 "phenotyping": self.pheno.to_dict(phenotype_metrics),  # Fenotipleme sonuçları ekle
                 "segmentation": segmentation_outputs,  # Add detailed segmentation outputs
                 "status": opt_status,
