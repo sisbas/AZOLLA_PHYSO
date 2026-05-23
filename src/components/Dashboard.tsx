@@ -481,6 +481,16 @@ const getQcStatusNotes = (frame: any) => {
     notes.push(`Yöntem değişti: ${method} → ${methodUsed}`);
   }
 
+  const qcConfidence = getNumericValue(frame?.qc_confidence);
+  const ciLower = getNumericValue(frame?.confidence_interval?.lower);
+  const ciUpper = getNumericValue(frame?.confidence_interval?.upper);
+  if (qcConfidence !== null && qcConfidence < 0.6) {
+    notes.push('Bu skorun belirsizliği yüksek.');
+  }
+  if (ciLower !== null && ciUpper !== null && (ciUpper - ciLower) > 0.35) {
+    notes.push(`Bu skorun belirsizliği yüksek (GA: ${(ciLower * 100).toFixed(0)}–${(ciUpper * 100).toFixed(0)}%).`);
+  }
+
   return notes;
 };
 
@@ -1489,6 +1499,8 @@ export default function Dashboard({ taskId }: DashboardProps) {
     qcRows,
     qcHasDetailedData: hasQcFields,
     qcSummary,
+    qcConfidence: getNumericValue(currentFrame?.qc_confidence),
+    qcConfidenceInterval: currentFrame?.confidence_interval ?? null,
     qcStatusNotes,
     compositeRisk,
     errorsBySeverity,

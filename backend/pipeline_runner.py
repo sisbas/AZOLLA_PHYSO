@@ -157,6 +157,44 @@ class AzollaPipeline:
 
     def run_series(self, frames: List[Tuple[np.ndarray, str]], experiment_id: str) -> Dict[str, Any]:
         """Runs the pipeline over a time-series and applies temporal decision engine."""
+        def raw_qc_score(frame: Dict[str, Any]) -> Tuple[float, Dict[str, float]]:
+            metrics = frame.get("metrics", {})
+            status = str(frame.get("status", "")).lower()
+            errors = frame.get("errors", []) or []
+            contributions = {
+                "coverage_quality": 0.0,
+                "otsu_validity": 0.0,
+                "geometry_plausibility": 0.0,
+                "frond_count_quality": 0.0,
+                "error_penalty": 0.0,
+                "fallback_penalty": 0.0,
+            }
+            coverage = float(np.clip(float(metrics.get("coverage_pct", 0.0) or 0.0), 0.0, 100.0))
+            contributions["coverage_quality"] = min(coverage / 100.0, 0.35)
+            contributions["otsu_validity"] = 0.15 if metrics.get("otsu_valid", True) is not False else 0.0
+            contributions["geometry_plausibility"] = 0.20 if metrics.get("plausible", True) is not False else 0.0
+            frond = float(metrics.get("frond_count", 0.0) or 0.0)
+            frond_ok = 1.0 if 5 <= frond <= 350 else 0.5 if frond > 0 else 0.0
+            contributions["frond_count_quality"] = 0.15 * frond_ok
+            critical_count = sum(
+                1 for err in errors
+                if str(err.get("severity", "")).lower() in {"critical", "error"}
+            )
+            contributions["error_penalty"] = -min(0.25, 0.08 * critical_count)
+            if any(tag in status for tag in ("fallback", "failed", "degraded")):
+                contributions["fallback_penalty"] = -0.10
+            score = float(np.clip(sum(contributions.values()) + 0.25, 0.0, 1.0))
+            return score, contributions
+
+        def confidence_interval(probability: float, n: int) -> Dict[str, float]:
+            n_eff = max(int(n), 1)
+            se = np.sqrt((probability * (1.0 - probability)) / n_eff)
+            margin = 1.96 * se
+            return {
+                "lower": float(np.clip(probability - margin, 0.0, 1.0)),
+                "upper": float(np.clip(probability + margin, 0.0, 1.0)),
+                "method": "normal_approx_95",
+            }
         def rolling_stats(values: pd.Series, window: int = 3) -> Tuple[List[float], List[float]]:
             moving_avg = values.rolling(window=window, min_periods=1).mean().fillna(0.0)
             moving_std = values.rolling(window=window, min_periods=1).std(ddof=0).fillna(0.0)
@@ -288,6 +326,22 @@ class AzollaPipeline:
             feature_df = pd.DataFrame(feature_data)
             
             decision_df = self.dec.process(feature_df)
+            qc_raw_scores: List[float] = []
+            qc_contribs: List[Dict[str, float]] = []
+            for frame_res in results_list:
+                score, contrib = raw_qc_score(frame_res)
+                qc_raw_scores.append(score)
+                qc_contribs.append(contrib)
+
+            calib_cfg = self.config.get("validation", {}).get("qc_calibration", {})
+            history = calib_cfg.get("history", [])
+            reliability = self.val.reliability_targets(history)
+            calibration_method = str(calib_cfg.get("method", "isotonic")).lower()
+            calibrated = self.val.calibrate_scores(
+                qc_raw_scores,
+                reliability,
+                method="platt" if calibration_method == "platt" else "isotonic"
+            )
             
             # Final validation
             self.logger.debug("Running cross-validation...")
@@ -301,6 +355,15 @@ class AzollaPipeline:
                 # consume a single metric namespace.
                 if 'early_stress_prob' in decision_data:
                     res['metrics']['early_stress_prob'] = decision_data['early_stress_prob']
+                qc_conf = calibrated["calibrated_scores"][i]
+                ci = confidence_interval(qc_conf, max(reliability.get("count", 0), len(results_list)))
+                res["qc_confidence"] = qc_conf
+                res["confidence_interval"] = ci
+                res["qc_feature_contributions"] = qc_contribs[i]
+                total_contrib = sum(abs(v) for v in qc_contribs[i].values()) or 1.0
+                res["qc_contribution_percentages"] = {
+                    k: float((abs(v) / total_contrib) * 100.0) for k, v in qc_contribs[i].items()
+                }
                 res['errors'].extend(decision_data.get('errors', []))
 
             timeline_df = pd.DataFrame({
@@ -341,6 +404,11 @@ class AzollaPipeline:
             metadata['decision'] = {
                 "early_weights": self.config.get('decision', {}).get('early_weights', {}),
                 "prob_threshold": self.config.get('decision', {}).get('prob_threshold')
+            }
+            metadata["qc_calibration"] = {
+                "method": calibrated.get("method"),
+                "training_count": calibrated.get("training_count", 0),
+                "warning": calibrated.get("warning"),
             }
             
             self.logger.info(f"Series processing completed for experiment {experiment_id}")
