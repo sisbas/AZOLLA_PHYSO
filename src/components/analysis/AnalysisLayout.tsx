@@ -19,16 +19,18 @@ function TopMetricsRow({ model }: { model: any }) {
     : '—';
   const frondCount = model.currentFrondCount === null ? '—' : model.currentFrondCount.toFixed(0);
   const qcLabel = model.qcSummary?.label ?? 'QC bilinmiyor';
+  const riskIndex = typeof model.compositeRisk?.score === 'number' ? `${model.compositeRisk.score}/100` : '—';
 
   const cards = [
     { label: 'Stres olasılığı', value: stressProbability },
     { label: 'Kapsama', value: coverage },
     { label: 'Frond sayısı', value: frondCount },
     { label: 'QC durumu', value: qcLabel },
+    { label: 'Risk Endeksi', value: riskIndex },
   ];
 
   return (
-    <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+    <div className="grid grid-cols-2 xl:grid-cols-5 gap-3">
       {cards.map((card) => (
         <div key={card.label} className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
           <p className="text-xs font-semibold text-slate-500">{card.label}</p>
@@ -60,6 +62,7 @@ function DecisionPanel({ model }: { model: any }) {
   const {
     currentFrame,
     decisionProbability,
+    compositeRisk,
     decisionWeightsFromApi,
     decisionContributionRows,
     formatDecisionValue,
@@ -89,6 +92,15 @@ function DecisionPanel({ model }: { model: any }) {
             {decisionProbability === null ? '—' : Math.round(decisionProbability * 100)}<span className="text-2xl text-slate-300">%</span>
           </span>
           <span className="text-xs font-bold text-slate-400">Karar olasılığı</span>
+        </div>
+        <div className="flex items-center justify-between rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+          <span className="text-xs font-bold text-slate-500">Risk Endeksi</span>
+          <span className={cn(
+            'text-sm font-black tabular-nums',
+            compositeRisk?.band === 'high' ? 'text-rose-600' : compositeRisk?.band === 'medium' ? 'text-amber-600' : 'text-emerald-600'
+          )}>
+            {typeof compositeRisk?.score === 'number' ? `${compositeRisk.score}/100 (${compositeRisk.label})` : '—'}
+          </span>
         </div>
       </div>
 
