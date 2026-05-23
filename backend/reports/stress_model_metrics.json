@@ -1,0 +1,25 @@
+{
+  "dataset": {
+    "n_samples": 960,
+    "n_stressed": 498,
+    "n_control": 462
+  },
+  "baseline_weighted_threshold": {
+    "weights": {
+      "rg_ratio_pct": 0.4,
+      "mean_g_pct": 0.3,
+      "glcm_entropy_pct": 0.2,
+      "coverage_pct": 0.1
+    },
+    "threshold": 0.45,
+    "roc_auc": 0.9830490794346216,
+    "sensitivity": 1.0,
+    "specificity": 0.2510822510822511
+  },
+  "calibrated_logistic": {
+    "threshold": 0.677065026110188,
+    "roc_auc_test": 0.9761540600667408,
+    "sensitivity_test": 0.8790322580645161,
+    "specificity_test": 0.9482758620689655
+  }
+}

@@ -4,6 +4,8 @@ import pandas as pd
 import logging
 from typing import Dict, Any, List
 from dataclasses import dataclass
+from pathlib import Path
+import json
 from statsmodels.stats.multitest import multipletests
 
 from .errors import format_error
@@ -27,9 +29,40 @@ class DecisionModule:
         self.alpha = self.cfg['alpha']
         self.weights = self.cfg['early_weights']
         self.prob_thresh = self.cfg['prob_threshold']
+        self.model = None
+        self.model_features = ['rg_ratio', 'mean_g', 'glcm_entropy', 'coverage_pct']
+        self.model_base_coef = None
+        self.model_base_intercept = 0.0
+        self.model_calib_coef = None
+        self.model_calib_intercept = 0.0
+
+        model_path = Path(__file__).resolve().parents[1] / 'models' / 'early_stress_calibrated_logreg_params.json'
+        if model_path.exists():
+            try:
+                bundle = json.loads(model_path.read_text(encoding='utf-8'))
+                self.model_features = bundle.get('features', self.model_features)
+                self.prob_thresh = float(bundle.get('threshold', self.prob_thresh))
+                self.model_base_coef = np.array(bundle['base_linear']['coef'], dtype=float)
+                self.model_base_intercept = float(bundle['base_linear']['intercept'])
+                self.model_calib_coef = float(bundle['platt_calibration']['coef'])
+                self.model_calib_intercept = float(bundle['platt_calibration']['intercept'])
+                self.model = True
+                logging.info(f'Loaded calibrated early-stress model from {model_path}')
+            except Exception as exc:
+                logging.warning(f'Failed to load calibrated model ({exc}); fallback to weighted score.')
 
     def calculate_prob(self, features: Dict[str, float]) -> float:
-        """Weighted probability of early stress."""
+        """Early stress probability from calibrated model; fallback to weighted score."""
+        if self.model is not None:
+            x = np.array([float(features.get(name, 0.0)) for name in self.model_features], dtype=float)
+            try:
+                linear_score = float(np.dot(x, self.model_base_coef) + self.model_base_intercept)
+                z = self.model_calib_coef * linear_score + self.model_calib_intercept
+                prob = 1.0 / (1.0 + np.exp(-z))
+                return float(np.clip(prob, 0, 1))
+            except Exception as exc:
+                logging.warning(f'Model inference failed ({exc}); using weighted fallback.')
+
         prob = (
             features.get('rg_ratio', 0) * self.weights['rg_ratio_pct'] +
             (1 - features.get('mean_g', 0)) * self.weights['mean_g_pct'] +
