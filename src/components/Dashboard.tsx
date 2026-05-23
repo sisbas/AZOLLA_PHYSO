@@ -755,11 +755,17 @@ type SummaryMetric = {
   detail: string;
 };
 
+type SummaryFinding = {
+  finding_text: string;
+  evidence: string;
+  confidence: number;
+};
+
 type SummaryReport = {
   successfulFrames: number;
   totalFrames: number;
   metrics: SummaryMetric[];
-  findings: string[];
+  findings: SummaryFinding[];
 };
 
 const isSuccessfulTimelineFrame = (frame: any) => {
@@ -883,6 +889,41 @@ const computeCompositeRiskScore = (timeline: any[], currentFrame: any, currentIn
     },
   };
 };
+
+
+type RuleEngineConfig = {
+  trendRule: {
+    metric: 'stress';
+    windowFrames: number;
+    slopeThreshold: number;
+    confidence: number;
+  };
+  thresholdDurationRule: {
+    metric: 'stress';
+    threshold: number;
+    minFrames: number;
+    confidence: number;
+  };
+  combinedRule: {
+    qcReliableRatioMin: number;
+    riskScoreMin: number;
+    confidence: number;
+  };
+  contradictionRule: {
+    stressThreshold: number;
+    maxCoverageSupport: number;
+    maxBrowningSupport: number;
+    confidence: number;
+  };
+};
+
+const SUMMARY_RULE_ENGINE: RuleEngineConfig = {
+  trendRule: { metric: 'stress', windowFrames: 5, slopeThreshold: 0.03, confidence: 0.82 },
+  thresholdDurationRule: { metric: 'stress', threshold: 0.7, minFrames: 3, confidence: 0.86 },
+  combinedRule: { qcReliableRatioMin: 0.8, riskScoreMin: 67, confidence: 0.78 },
+  contradictionRule: { stressThreshold: 0.7, maxCoverageSupport: 45, maxBrowningSupport: 12, confidence: 0.74 },
+};
+
 const getChlorophyllValue = (frame: any) => getPhenotypingValue(frame.phenotyping, 'chlorophyll_index');
 const getBiomassValue = (frame: any) => getPhenotypingValue(frame.phenotyping, 'fresh_biomass_g_m2');
 
@@ -905,50 +946,127 @@ const buildSummaryReport = (timeline: any[]): SummaryReport => {
   const latestReliable = sourceFrames[sourceFrames.length - 1]?.metrics?.is_reliable;
   const unreliableCount = sourceFrames.filter((frame) => frame.metrics?.is_reliable === false || frame.metrics?.plausible === false).length;
 
-  const findings: string[] = [];
+  const findings: SummaryFinding[] = [];
+  const addFinding = (finding_text: string, evidence: string, confidence: number) => {
+    findings.push({ finding_text, evidence, confidence: Math.max(0, Math.min(1, confidence)) });
+  };
+
+  const trendWindow = sourceFrames.slice(-SUMMARY_RULE_ENGINE.trendRule.windowFrames);
+  if (trendWindow.length >= 2) {
+    const trendDelta = (getStressProbability(trendWindow[trendWindow.length - 1]) ?? 0) - (getStressProbability(trendWindow[0]) ?? 0);
+    if (trendDelta >= SUMMARY_RULE_ENGINE.trendRule.slopeThreshold) {
+      addFinding(
+        'Trend kuralı: Son framelerde stres artış eğilimi var.',
+        `Metrik: early_stress_prob, aralık: son ${trendWindow.length} frame, eğim: +${(trendDelta * 100).toFixed(1)} yüzde puan.`,
+        SUMMARY_RULE_ENGINE.trendRule.confidence,
+      );
+    } else if (trendDelta <= -SUMMARY_RULE_ENGINE.trendRule.slopeThreshold) {
+      addFinding(
+        'Trend kuralı: Son framelerde stres azalış eğilimi var.',
+        `Metrik: early_stress_prob, aralık: son ${trendWindow.length} frame, eğim: ${(trendDelta * 100).toFixed(1)} yüzde puan.`,
+        SUMMARY_RULE_ENGINE.trendRule.confidence,
+      );
+    }
+  }
+
+  let streak = 0;
+  let maxStreak = 0;
+  let streakStart = 0;
+  let bestStart = 0;
+  let bestEnd = 0;
+  sourceFrames.forEach((frame, idx) => {
+    const stress = getStressProbability(frame);
+    if (stress !== null && stress > SUMMARY_RULE_ENGINE.thresholdDurationRule.threshold) {
+      if (streak === 0) streakStart = idx;
+      streak += 1;
+      if (streak > maxStreak) {
+        maxStreak = streak;
+        bestStart = streakStart;
+        bestEnd = idx;
+      }
+    } else {
+      streak = 0;
+    }
+  });
+
+  if (maxStreak >= SUMMARY_RULE_ENGINE.thresholdDurationRule.minFrames) {
+    addFinding(
+      'Eşik+süre kuralı: Stres eşiği yeterli süre boyunca aşıldı.',
+      `Metrik: early_stress_prob > ${(SUMMARY_RULE_ENGINE.thresholdDurationRule.threshold * 100).toFixed(0)}%, frame aralığı: ${bestStart + 1}-${bestEnd + 1}, süre: ${maxStreak} frame.`,
+      SUMMARY_RULE_ENGINE.thresholdDurationRule.confidence,
+    );
+  }
 
   if (stressChange.delta !== null && stressChange.delta > 0.05) {
-    findings.push(`Stres artıyor: ilk başarılı karede ${(stressChange.first! * 100).toFixed(1)}%, son başarılı karede ${(stressChange.last! * 100).toFixed(1)}% (değişim ${formatSignedNumber(stressChange.delta * 100, 1, ' yüzde puan')}).`);
+    addFinding(`Stres artıyor: ilk başarılı karede ${(stressChange.first! * 100).toFixed(1)}%, son başarılı karede ${(stressChange.last! * 100).toFixed(1)}% (değişim ${formatSignedNumber(stressChange.delta * 100, 1, ' yüzde puan')}).`, `Metrik: early_stress_prob, frame aralığı: 1-${sourceFrames.length}.`, 0.72);
   } else if (stressChange.delta !== null && stressChange.delta < -0.05) {
-    findings.push(`Stres azalıyor: ilk başarılı karede ${(stressChange.first! * 100).toFixed(1)}%, son başarılı karede ${(stressChange.last! * 100).toFixed(1)}% (değişim ${formatSignedNumber(stressChange.delta * 100, 1, ' yüzde puan')}).`);
+    addFinding(`Stres azalıyor: ilk başarılı karede ${(stressChange.first! * 100).toFixed(1)}%, son başarılı karede ${(stressChange.last! * 100).toFixed(1)}% (değişim ${formatSignedNumber(stressChange.delta * 100, 1, ' yüzde puan')}).`, `Metrik: early_stress_prob, frame aralığı: 1-${sourceFrames.length}.`, 0.72);
   }
 
   if (avgStressValue !== null && avgStressValue >= 0.6) {
-    findings.push(`Ortalama stres yüksek: başarılı kare ortalaması ${(avgStressValue * 100).toFixed(1)}% ve eşik %60 üzerinde.`);
+    addFinding(`Ortalama stres yüksek: başarılı kare ortalaması ${(avgStressValue * 100).toFixed(1)}% ve eşik %60 üzerinde.`, `Metrik: early_stress_prob ortalama, frame aralığı: 1-${sourceFrames.length}.`, 0.7);
   }
 
   if (maxStressValue !== null && maxStressValue >= 0.8) {
-    findings.push(`Maksimum stres kritik: en yüksek değer ${(maxStressValue * 100).toFixed(1)}% ve eşik %80 üzerinde.`);
+    addFinding(`Maksimum stres kritik: en yüksek değer ${(maxStressValue * 100).toFixed(1)}% ve eşik %80 üzerinde.`, `Metrik: early_stress_prob max, frame aralığı: 1-${sourceFrames.length}.`, 0.76);
   }
 
   if (coverageChange.delta !== null && coverageChange.delta < -2) {
-    findings.push(`Kapsama düşüyor: ${coverageChange.first!.toFixed(1)}% → ${coverageChange.last!.toFixed(1)}% (değişim ${formatSignedNumber(coverageChange.delta, 1, ' yüzde puan')}).`);
+    addFinding(`Kapsama düşüyor: ${coverageChange.first!.toFixed(1)}% → ${coverageChange.last!.toFixed(1)}% (değişim ${formatSignedNumber(coverageChange.delta, 1, ' yüzde puan')}).`, `Metrik: coverage_percent, frame aralığı: 1-${sourceFrames.length}.`, 0.73);
   }
 
   if (latestChlorophyll !== null && latestChlorophyll < 2.5) {
-    findings.push(`Klorofil düşük: son ölçüm ${latestChlorophyll.toFixed(3)} ve 2.500 eşik değerinin altında.`);
+    addFinding(`Klorofil düşük: son ölçüm ${latestChlorophyll.toFixed(3)} ve 2.500 eşik değerinin altında.`, `Metrik: chlorophyll_index, frame: ${sourceFrames.length}.`, 0.71);
   }
 
   if (latestCoverage !== null && latestCoverage > 85) {
-    findings.push(`Yoğunluk yüksek: son kapsama ${latestCoverage.toFixed(1)}%, su yüzeyi/alan sıkışması riski artabilir.`);
+    addFinding(`Yoğunluk yüksek: son kapsama ${latestCoverage.toFixed(1)}%, su yüzeyi/alan sıkışması riski artabilir.`, `Metrik: coverage_percent, frame: ${sourceFrames.length}.`, 0.64);
   }
 
   if (latestFronds !== null && latestFronds > 1000) {
-    findings.push(`Yaprak yoğunluğu yüksek: son yaprak sayısı ${latestFronds.toFixed(0)}, ayrışma/üst üste binme kaynaklı yoğunluk riski izlenmeli.`);
+    addFinding(`Yaprak yoğunluğu yüksek: son yaprak sayısı ${latestFronds.toFixed(0)}, ayrışma/üst üste binme kaynaklı yoğunluk riski izlenmeli.`, `Metrik: frond_count, frame: ${sourceFrames.length}.`, 0.66);
   }
 
   if (latestReliable === false || unreliableCount > 0) {
-    findings.push(`QC düşük: ${unreliableCount}/${sourceFrames.length} başarılı karede güvenilirlik veya yaprak geometri uygunluğu uyarısı var.`);
+    addFinding(`QC düşük: ${unreliableCount}/${sourceFrames.length} başarılı karede güvenilirlik veya yaprak geometri uygunluğu uyarısı var.`, `Metrik: is_reliable/plausible, frame aralığı: 1-${sourceFrames.length}.`, 0.8);
   }
 
   if (biomassTrend.delta !== null && biomassTrend.delta < 0) {
-    findings.push(`Biyokütle trendi negatif: ${biomassTrend.first!.toFixed(1)} g/m² → ${biomassTrend.last!.toFixed(1)} g/m² (değişim ${formatSignedNumber(biomassTrend.delta, 1, ' g/m²')}).`);
+    addFinding(`Biyokütle trendi negatif: ${biomassTrend.first!.toFixed(1)} g/m² → ${biomassTrend.last!.toFixed(1)} g/m² (değişim ${formatSignedNumber(biomassTrend.delta, 1, ' g/m²')}).`, `Metrik: fresh_biomass_g_m2, frame aralığı: 1-${sourceFrames.length}.`, 0.74);
+  }
+
+
+
+  const reliableFrames = sourceFrames.filter((frame) => frame.metrics?.is_reliable !== false && frame.metrics?.plausible !== false);
+  const reliableRatio = sourceFrames.length ? reliableFrames.length / sourceFrames.length : 0;
+  const avgRiskScore = reliableFrames.length
+    ? average(reliableFrames.map((frame, idx) => computeCompositeRiskScore(reliableFrames, frame, idx, { level: 'good' }).score))
+    : null;
+
+  if (reliableRatio >= SUMMARY_RULE_ENGINE.combinedRule.qcReliableRatioMin && avgRiskScore !== null && avgRiskScore >= SUMMARY_RULE_ENGINE.combinedRule.riskScoreMin) {
+    addFinding(
+      'Kombine kural: QC iyi ancak risk yüksek, biyolojik stres şüphesi.',
+      `Metrikler: QC reliable oranı ${(reliableRatio * 100).toFixed(0)}%, ortalama bileşik risk ${avgRiskScore.toFixed(1)}.`,
+      SUMMARY_RULE_ENGINE.combinedRule.confidence,
+    );
+  }
+
+  if (maxStressValue !== null && maxStressValue >= SUMMARY_RULE_ENGINE.contradictionRule.stressThreshold) {
+    const coverageSupport = latestCoverage ?? 0;
+    const browningSupport = getPhenotypingValue(sourceFrames[sourceFrames.length - 1]?.phenotyping, 'stress_browning_percent') ?? 0;
+    if (coverageSupport <= SUMMARY_RULE_ENGINE.contradictionRule.maxCoverageSupport && browningSupport <= SUMMARY_RULE_ENGINE.contradictionRule.maxBrowningSupport) {
+      addFinding(
+        'Çelişki kuralı: Model stres sinyali veriyor ancak renk/kapsama sinyalleri desteklemiyor.',
+        `Metrikler: max stress ${(maxStressValue * 100).toFixed(1)}%, coverage ${coverageSupport.toFixed(1)}%, browning ${browningSupport.toFixed(1)}%.`,
+        SUMMARY_RULE_ENGINE.contradictionRule.confidence,
+      );
+    }
   }
 
   if (sourceFrames.length === 0) {
-    findings.push('Başarılı timeline karesi bulunamadı; deterministik özet için kullanılabilir metrik yok.');
+    addFinding('Başarılı timeline karesi bulunamadı; deterministik özet için kullanılabilir metrik yok.', 'Metrik yok, başarılı frame sayısı 0.', 0.95);
   } else if (findings.length === 0) {
-    findings.push('Belirgin deterministik uyarı oluşmadı: stres, kapsama, klorofil, yoğunluk ve QC kuralları kritik eşikleri aşmadı.');
+    addFinding('Belirgin deterministik uyarı oluşmadı: stres, kapsama, klorofil, yoğunluk ve QC kuralları kritik eşikleri aşmadı.', `İncelenen frame aralığı: 1-${sourceFrames.length}.`, 0.6);
   }
 
   return {
