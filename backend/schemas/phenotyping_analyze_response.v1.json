@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://azolla.local/schemas/phenotyping/analyze-response/v1",
+  "title": "PhenotypingAnalyzeResponseV1",
+  "type": "object",
+  "required": ["schema_version", "data"],
+  "properties": {
+    "schema_version": {"type": "string", "const": "1.0.0"},
+    "data": {
+      "type": "object",
+      "required": [
+        "segmentasyon", "renk_indeksleri", "stres_analizi", "yogunluk_dagilimi",
+        "doku_analizi", "biyokutle_tahmini", "buyume_parametreleri", "images", "timestamp"
+      ],
+      "properties": {
+        "segmentasyon": {"type": "object"},
+        "renk_indeksleri": {"type": "object"},
+        "stres_analizi": {"type": "object"},
+        "yogunluk_dagilimi": {"type": "object"},
+        "doku_analizi": {"type": "object"},
+        "biyokutle_tahmini": {"type": "object"},
+        "buyume_parametreleri": {"type": "object"},
+        "date_comparison": {
+          "type": "object",
+          "required": ["days_diff", "start_date", "end_date"],
+          "properties": {
+            "days_diff": {"type": "integer"},
+            "start_date": {"type": "string", "format": "date"},
+            "end_date": {"type": "string", "format": "date"}
+          },
+          "additionalProperties": true
+        },
+        "images": {
+          "type": "object",
+          "required": ["preprocessed_rgb_png", "binary_mask_png", "isolated_rgb_png", "overlay_png"],
+          "properties": {
+            "preprocessed_rgb_png": {"type": "string"},
+            "binary_mask_png": {"type": "string"},
+            "isolated_rgb_png": {"type": "string"},
+            "overlay_png": {"type": "string"}
+          },
+          "additionalProperties": false
+        },
+        "timestamp": {"type": "string"}
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

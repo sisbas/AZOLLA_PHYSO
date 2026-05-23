@@ -47,7 +47,7 @@ __all__ = [
 
 ### 2. FRONTEND ENTEGRASYONU
 
-#### Yeni Sayfa: `src/components/PhenotypingView.tsx`
+#### Yeni Sayfa: `(repo içinde mevcut değil; backend odaklı entegrasyon)`
 - Modern, responsive dashboard tasarımı
 - MetricCard bileşeni ile görsel metrik kartları
 - Recharts ile grafik visualizasyonları
@@ -376,3 +376,25 @@ curl -X POST http://localhost:3000/api/v1/phenotyping/analyze \
 - `start_date ve end_date birlikte gönderilmelidir (ikisi de opsiyonel).`
 
 Eski çağrılar (`start_date`/`end_date` göndermeyen) aynı şekilde çalışmaya devam eder.
+
+---
+
+## 🔄 DİZİN SENKRONİZASYONU (2026-05-23)
+
+Bu repodaki gerçek backend dosya yolları:
+- `backend/core/phenotyping.py`
+- `backend/pipeline_runner.py`
+- `backend/core/__init__.py`
+- `backend/__init__.py`
+
+Fenotipleme API şema sürümlemesi:
+- JSON Schema: `backend/schemas/phenotyping_analyze_response.v1.json`
+- Örnek fixture: `fixtures/phenotyping/analyze_response.v1.min.json`
+
+`POST /api/v1/phenotyping/analyze` artık sürümlü zarf döndürür:
+```json
+{
+  "schema_version": "1.0.0",
+  "data": { ... }
+}
+```

@@ -33,14 +33,14 @@ An AI-powered system for early detection of stress in Azolla plants using comput
 
 ## API Endpoints
 
-- `GET /api/health` - Health check
+- `GET /api/v1/health` - Health check
 - `POST /api/v1/predict/series` - Submit images for analysis
 - `GET /api/v1/tasks/:id/status` - Check task status
 - `GET /api/v1/tasks/:id/results` - Get analysis results
 
 ## Configuration
 
-Edit `config.json` to customize processing parameters directly from the UI.
+Edit `backend/config.yaml` to customize processing parameters directly from the UI.
 
 ## Local Development
 
