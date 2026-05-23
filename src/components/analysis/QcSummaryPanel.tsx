@@ -5,7 +5,15 @@ import { analysisTypography } from './typography';
 import { analysisCardTokens, analysisStateTokens } from './visualTokens';
 
 export function QcSummaryPanel({ model }: { model: any }) {
-  const { currentFrame, qcRows, qcHasDetailedData, qcSummary, qcStatusNotes, errorSeverityEntries } = model;
+  const { currentFrame, qcRows, qcHasDetailedData, qcSummary, qcStatusNotes, errorSeverityEntries, compositeRisk } = model;
+  const blendedLabel = (() => {
+    const score = compositeRisk?.score;
+    if (typeof score !== 'number') return qcSummary.label;
+    if (qcSummary.level === 'reliable' && score >= 67) return 'QC iyi ama biyolojik risk artıyor';
+    if (qcSummary.level === 'warning' && score >= 67) return 'QC dikkat + biyolojik risk yüksek';
+    if (qcSummary.level === 'low' && score <= 33) return 'QC düşük, biyolojik risk sınırlı';
+    return `${qcSummary.label} · Risk ${score}/100`;
+  })();
 
   return (
     <motion.div
@@ -28,7 +36,7 @@ export function QcSummaryPanel({ model }: { model: any }) {
             qcSummary.level === 'warning' ? analysisStateTokens.warning :
               analysisStateTokens.danger
         )}>
-          {qcSummary.label}
+          {blendedLabel}
         </span>
       </div>
 

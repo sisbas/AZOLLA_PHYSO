@@ -798,6 +798,91 @@ const getCoverageValue = (frame: any) => (
 
 const getFrondValue = (frame: any) => getNumericValue(frame.metrics?.frond_count);
 const getStressProbability = (frame: any) => getNumericValue(frame.metrics?.early_stress_prob ?? frame.metrics?.mean_stress_score);
+
+type CompositeRiskBand = 'low' | 'medium' | 'high';
+
+interface CompositeRiskScore {
+  score: number;
+  band: CompositeRiskBand;
+  label: string;
+  components: {
+    stressProbability: number | null;
+    coverageChangeRate: number | null;
+    frondDensityDeviation: number | null;
+    qcPenalty: number;
+  };
+}
+
+const toPercentile = (values: number[], target: number): number | null => {
+  if (!values.length || !Number.isFinite(target)) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  let below = 0;
+  let equal = 0;
+  for (const value of sorted) {
+    if (value < target) below += 1;
+    else if (value === target) equal += 1;
+  }
+  const percentile = (below + (equal * 0.5)) / sorted.length;
+  return Math.max(0, Math.min(percentile, 1));
+};
+
+const getCompositeRiskBand = (score: number): CompositeRiskBand => {
+  if (score >= 67) return 'high';
+  if (score >= 34) return 'medium';
+  return 'low';
+};
+
+const getCompositeRiskLabel = (score: number): string => {
+  const band = getCompositeRiskBand(score);
+  if (band === 'high') return 'Yüksek risk';
+  if (band === 'medium') return 'Orta risk';
+  return 'Düşük risk';
+};
+
+const computeCompositeRiskScore = (timeline: any[], currentFrame: any, currentIndex: number, qcSummary: { level: QcLevel }): CompositeRiskScore => {
+  const stressProbability = getStressProbability(currentFrame);
+  const coverageValues = timeline.map((frame) => getCoverageValue(frame)).filter((value): value is number => value !== null);
+  const frondValues = timeline.map((frame) => getFrondValue(frame)).filter((value): value is number => value !== null);
+
+  const currentCoverage = getCoverageValue(currentFrame);
+  const previousFrame = currentIndex > 0 ? timeline[currentIndex - 1] : null;
+  const previousCoverage = previousFrame ? getCoverageValue(previousFrame) : null;
+  const coverageChangeRate = (currentCoverage !== null && previousCoverage !== null) ? currentCoverage - previousCoverage : null;
+
+  const medianFrond = frondValues.length
+    ? [...frondValues].sort((a, b) => a - b)[Math.floor(frondValues.length / 2)]
+    : null;
+  const frondDensityDeviation = (medianFrond !== null && getFrondValue(currentFrame) !== null)
+    ? Math.abs((getFrondValue(currentFrame) as number) - medianFrond)
+    : null;
+
+  const qcPenalty = qcSummary.level === 'low' ? 1 : qcSummary.level === 'warning' ? 0.5 : 0;
+
+  const stressPct = stressProbability === null ? 0.5 : Math.max(0, Math.min(stressProbability, 1));
+  const coveragePct = coverageChangeRate === null ? 0.5 : (toPercentile(coverageValues, currentCoverage ?? 0) ?? 0.5);
+  const frondPct = frondDensityDeviation === null ? 0.5 : (toPercentile(frondValues.map((v) => Math.abs(v - (medianFrond ?? v))), frondDensityDeviation) ?? 0.5);
+  const qcPct = qcPenalty;
+
+  const weightedLinear =
+    (0.42 * stressPct) +
+    (0.22 * coveragePct) +
+    (0.21 * frondPct) +
+    (0.15 * qcPct);
+  const sigmoid = 1 / (1 + Math.exp(-7 * (weightedLinear - 0.5)));
+  const score = Math.round(sigmoid * 100);
+
+  return {
+    score,
+    band: getCompositeRiskBand(score),
+    label: getCompositeRiskLabel(score),
+    components: {
+      stressProbability,
+      coverageChangeRate,
+      frondDensityDeviation,
+      qcPenalty,
+    },
+  };
+};
 const getChlorophyllValue = (frame: any) => getPhenotypingValue(frame.phenotyping, 'chlorophyll_index');
 const getBiomassValue = (frame: any) => getPhenotypingValue(frame.phenotyping, 'fresh_biomass_g_m2');
 
@@ -1321,6 +1406,7 @@ export default function Dashboard({ taskId }: DashboardProps) {
   const qcStatusNotes = getQcStatusNotes(currentFrame);
   const errorsBySeverity = groupErrorsBySeverity(Array.isArray(currentFrame.errors) ? currentFrame.errors : []);
   const errorSeverityEntries = Object.entries(errorsBySeverity) as Array<[string, any[]]>;
+  const compositeRisk = computeCompositeRiskScore(data.timeline, currentFrame, currentIndex, qcSummary);
   const stressBreakdownMetrics = STRESS_METRIC_CONFIG.map((metric) => {
     const value = getStressMetricValue(currentFrame, metric);
     const risk = getStressRisk(value, metric);
@@ -1404,6 +1490,7 @@ export default function Dashboard({ taskId }: DashboardProps) {
     qcHasDetailedData: hasQcFields,
     qcSummary,
     qcStatusNotes,
+    compositeRisk,
     errorsBySeverity,
     errorSeverityEntries,
     stressBreakdownMetrics,
