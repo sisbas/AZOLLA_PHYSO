@@ -1192,9 +1192,27 @@ export default function Dashboard({ taskId }: DashboardProps) {
       return acc;
     }, {} as Record<ChartMetricKey, number | null>);
 
+    const coverageSignal = frame?.time_series_signals?.coverage;
+    const frondSignal = frame?.time_series_signals?.frond_count;
+    const stressSignal = frame?.time_series_signals?.stress_score;
     return {
       time: idx,
       ...rawValues,
+      change_points: {
+        coverage: Boolean(coverageSignal?.change_point),
+        frond_count: Boolean(frondSignal?.change_point),
+        stress_score: Boolean(stressSignal?.change_point),
+      },
+      anomaly_scores: {
+        coverage: getNumericValue(coverageSignal?.anomaly_score),
+        frond_count: getNumericValue(frondSignal?.anomaly_score),
+        stress_score: getNumericValue(stressSignal?.anomaly_score),
+      },
+      anomaly_flags: {
+        coverage: Boolean(coverageSignal?.anomaly_flag),
+        frond_count: Boolean(frondSignal?.anomaly_flag),
+        stress_score: Boolean(stressSignal?.anomaly_flag),
+      },
       phenoCoverage: normalizePercent(rawValues.coverage),
       phenoChlorophyll: normalizeChlorophyll(rawValues.chlorophyll_index),
       phenoBiomass: normalizeChartValue('fresh_biomass_g_m2', rawValues.fresh_biomass_g_m2),

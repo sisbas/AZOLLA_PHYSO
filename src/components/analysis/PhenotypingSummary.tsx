@@ -28,6 +28,35 @@ export function PhenotypingSummary({ model }: { model: any }) {
     setNormalizeChart,
     getReferenceLineValue,
   } = model;
+  const metricSignalKeyMap: Record<string, string> = {
+    coverage: 'coverage',
+    fronds: 'frond_count',
+    score: 'stress_score',
+    prob: 'stress_score',
+  };
+
+  const changePointRows = chartData.filter((row: any) => (
+    enabledSelectedChartMetricConfigs.some((metric: any) => {
+      const signalKey = metricSignalKeyMap[metric.key];
+      return signalKey && row?.change_points?.[signalKey];
+    })
+  ));
+
+  const CustomTooltip = ({ active, payload, label }: any) => {
+    if (!active || !payload?.length) return null;
+    const firstMetric = enabledSelectedChartMetricConfigs[0];
+    const signalKey = metricSignalKeyMap[firstMetric?.key] || 'coverage';
+    const anomalyScore = payload?.[0]?.payload?.anomaly_scores?.[signalKey];
+    const isChangePoint = Boolean(payload?.[0]?.payload?.change_points?.[signalKey]);
+    return (
+      <div className="rounded-xl bg-slate-900 text-white p-3 text-xs space-y-1 shadow-xl">
+        <div className="font-black">Frame: {label}</div>
+        {payload.map((entry: any) => <div key={entry.dataKey}><span className="font-semibold">{entry.name}:</span> {entry.value ?? '—'}</div>)}
+        <div className="text-slate-300">anomaly_score: {typeof anomalyScore === 'number' ? anomalyScore.toFixed(2) : '—'}</div>
+        <div className="text-slate-300">change-point: {isChangePoint ? 'Evet' : 'Hayır'}</div>
+      </div>
+    );
+  };
 
   return (
     <>
@@ -132,7 +161,7 @@ export function PhenotypingSummary({ model }: { model: any }) {
               <CartesianGrid vertical={false} stroke="#f1f5f9" strokeDasharray="8 8" />
               <XAxis dataKey="time" tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 700 }} />
               <YAxis domain={chartDomain} tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 700 }} />
-              <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: 'none', borderRadius: '12px', color: '#fff', fontSize: '10px' }} />
+              <Tooltip content={<CustomTooltip />} />
               {enabledSelectedChartMetricConfigs.map((metric: any) => (
                 <Line key={metric.key} type="monotone" dataKey={`${metric.key}Display`} name={metric.label} stroke={metric.color} strokeWidth={3} dot={false} activeDot={{ r: 5 }} />
               ))}
@@ -140,12 +169,15 @@ export function PhenotypingSummary({ model }: { model: any }) {
                 const value = getReferenceLineValue(metric);
                 return value === null ? null : <ReferenceLine key={`${metric.key}-ref`} y={value} stroke={metric.color} strokeDasharray="4 4" />;
               })}
+              {changePointRows.map((row: any) => (
+                <ReferenceLine key={`cp-${row.time}`} x={row.time} stroke="#dc2626" strokeDasharray="3 3" />
+              ))}
             </LineChart>
           </ResponsiveContainer>
         </div>
         <div className="mt-5 flex items-start gap-2 p-3 bg-blue-50 border border-blue-100 rounded-xl">
           <Activity size={14} className="text-blue-600 mt-0.5 shrink-0" />
-          <p className="text-sm leading-relaxed font-semibold text-blue-800">Grafik normalize edildiğinde her metrik kendi min/max aralığına göre 0-1 bandına taşınır.</p>
+          <p className="text-sm leading-relaxed font-semibold text-blue-800">Grafik normalize edildiğinde her metrik kendi min/max aralığına göre 0-1 bandına taşınır; anomali eşikleri robust z-score (median+MAD) üzerinde hesaplanır. Normalize kapalıyken eşik hesaplaması ham zaman serisi değerleriyle yapılır.</p>
         </div>
       </AnalysisCard>
     </>
