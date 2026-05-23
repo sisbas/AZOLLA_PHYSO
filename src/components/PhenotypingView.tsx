@@ -51,6 +51,11 @@ interface PhenotypingData {
     doubling_time_days: number | null;
     max_coverage_percent: number;
   };
+  date_comparison?: {
+    days_diff: number;
+    start_date: string;
+    end_date: string;
+  };
   errors?: any[];
 }
 
@@ -187,6 +192,8 @@ export default function PhenotypingView() {
   const [isolatedRgbPng, setIsolatedRgbPng] = useState<string | null>(null);
   const [overlayPng, setOverlayPng] = useState<string | null>(null);
   const [mode, setMode] = useState<'single' | 'batch'>('single');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
 
   const downloadReport = () => {
     if (!data) return;
@@ -231,6 +238,10 @@ export default function PhenotypingView() {
       const form = new FormData();
       form.append('image', file);
       form.append('pool_area_m2', String(parsedPoolArea));
+      if (startDate && endDate) {
+        form.append('start_date', startDate);
+        form.append('end_date', endDate);
+      }
       const res = await fetch('/api/v1/phenotyping/analyze', { method: 'POST', body: form });
       if (!res.ok) {
         const text = await res.text();
@@ -321,6 +332,26 @@ export default function PhenotypingView() {
                 placeholder="16"
               />
             </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label className="block text-[10px] font-black uppercase tracking-widest text-slate-500">
+                Başlangıç Tarihi (opsiyonel)
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="mt-2 w-full px-3 py-2 rounded-lg border border-slate-300 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                />
+              </label>
+              <label className="block text-[10px] font-black uppercase tracking-widest text-slate-500">
+                Bitiş Tarihi (opsiyonel)
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="mt-2 w-full px-3 py-2 rounded-lg border border-slate-300 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                />
+              </label>
+            </div>
             <div className="flex items-start gap-2 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-semibold leading-relaxed text-blue-800">
               <Info size={14} className="mt-0.5 shrink-0" />
               <span>Ölçüm doğruluğu alan kalibrasyonuna bağlıdır; havuz alanını gerçek ölçüye göre girin.</span>

@@ -336,3 +336,43 @@ result_dict = module.to_dict(metrics)
 **Proje Tarihi:** 2024
 **Versiyon:** 1.0.0
 **Durum:** ✅ Backend + Frontend Entegrasyonu Tamamlandı
+
+## Tarih Aralığı Karşılaştırması (Yeni)
+
+Fenotipleme endpoint'i geriye dönük uyumlu şekilde iki opsiyonel alan kabul eder:
+
+- `start_date` (`YYYY-MM-DD`)
+- `end_date` (`YYYY-MM-DD`)
+
+> Not: Bu alanlar birlikte gönderilmelidir. Sadece biri gönderilirse doğrulama hatası döner.
+
+### Örnek istek
+
+```bash
+curl -X POST http://localhost:3000/api/v1/phenotyping/analyze \
+  -F "image=@sample.jpg" \
+  -F "pool_area_m2=16" \
+  -F "start_date=2026-01-01" \
+  -F "end_date=2026-02-12"
+```
+
+### Örnek çıktı parçası
+
+```json
+{
+  "date_comparison": {
+    "days_diff": 42,
+    "start_date": "2026-01-01",
+    "end_date": "2026-02-12"
+  }
+}
+```
+
+### Hata durumları
+
+- `Geçersiz start_date formatı: '...'. Beklenen format: YYYY-MM-DD.`
+- `Geçersiz end_date formatı: '...'. Beklenen format: YYYY-MM-DD.`
+- `Geçersiz tarih aralığı: start_date, end_date değerinden büyük olamaz.`
+- `start_date ve end_date birlikte gönderilmelidir (ikisi de opsiyonel).`
+
+Eski çağrılar (`start_date`/`end_date` göndermeyen) aynı şekilde çalışmaya devam eder.

@@ -221,9 +221,22 @@ async def get_task_results(task_id: str):
 
 
 @app.post("/api/v1/phenotyping/analyze")
-async def analyze_phenotyping(image: UploadFile = File(...), pool_area_m2: float = 16.0):
+async def analyze_phenotyping(
+    image: UploadFile = File(...),
+    pool_area_m2: float = Form(16.0),
+    start_date: Optional[str] = Form(None),
+    end_date: Optional[str] = Form(None),
+):
     try:
         logger.info(f"Starting phenotyping analysis, pool_area: {pool_area_m2} m²")
+        try:
+            parsed_start_date, parsed_end_date = phenotyping_service.validate_date_inputs(
+                start_date=start_date,
+                end_date=end_date,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
         contents = await image.read()
         nparr = np.frombuffer(contents, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
@@ -231,7 +244,12 @@ async def analyze_phenotyping(image: UploadFile = File(...), pool_area_m2: float
             logger.warning("Failed to decode phenotyping image")
             raise HTTPException(status_code=400, detail="Geçersiz görüntü dosyası.")
         
-        result = phenotyping_service.analyze(img, pool_area_m2=pool_area_m2)
+        result = phenotyping_service.analyze(
+            img,
+            pool_area_m2=pool_area_m2,
+            start_date=parsed_start_date,
+            end_date=parsed_end_date,
+        )
         logger.info("Phenotyping analysis completed successfully")
         return result
     except HTTPException:
