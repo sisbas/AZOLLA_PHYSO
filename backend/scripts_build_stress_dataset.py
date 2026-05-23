@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import math
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
@@ -49,10 +50,12 @@ for cond in conditions:
             rgr = np.clip(0.16 - 0.12*latent + RNG.normal(0,0.015), -0.05, 0.25)
 
             y = 1 if latent > 0.52 else 0
+            group_label = 'control' if cond == 'control' else 'stress'
 
             rows.append({
-                'sample_id': f'S{idx:04d}',
-                'day': day,
+                'sample_id': f'{cond}_R{rep+1:02d}',
+                'day_index': day,
+                'group_label': group_label,
                 'condition': cond,
                 'rg_ratio': rg_ratio,
                 'mean_g': mean_g,
@@ -63,9 +66,14 @@ for cond in conditions:
                 'rgr_g_g_day': rgr,
                 'is_stressed': y,
             })
-            idx += 1
 
 df = pd.DataFrame(rows)
+# Zorunlu veri modeli alanlarını doğrula
+required_model_fields = ['group_label', 'sample_id', 'day_index']
+missing = [col for col in required_model_fields if col not in df.columns]
+if missing:
+    raise ValueError(f"Eksik zorunlu veri modeli alanları: {missing}")
+
 OUT_DATA.parent.mkdir(parents=True, exist_ok=True)
 df.to_csv(OUT_DATA, index=False)
 
@@ -122,6 +130,81 @@ tn, fp, fn, tp = confusion_matrix(y_test, yhat_cal).ravel()
 sens_cal = tp / (tp + fn)
 spec_cal = tn / (tn + fp)
 
+# Δsample / Δcorrected + etki büyüklüğü ve p-değeri hesapları
+feature_cols = ['rg_ratio', 'mean_g', 'glcm_entropy', 'coverage_pct', 'chlorophyll_a_mg_g_fw', 'carotenoid_mg_g_fw', 'rgr_g_g_day']
+
+start_day = int(df['day_index'].min())
+end_day = int(df['day_index'].max())
+start_df = df[df['day_index'] == start_day].set_index('sample_id')
+end_df = df[df['day_index'] == end_day].set_index('sample_id')
+common_samples = start_df.index.intersection(end_df.index)
+paired_start = start_df.loc[common_samples]
+paired_end = end_df.loc[common_samples]
+
+delta_df = pd.DataFrame({
+    'sample_id': common_samples,
+    'group_label': paired_start['group_label'].values,
+    'day_start': start_day,
+    'day_end': end_day,
+})
+
+for col in feature_cols:
+    delta_df[f'delta_sample_{col}'] = paired_end[col].to_numpy() - paired_start[col].to_numpy()
+
+summary_rows = []
+for col in feature_cols:
+    delta_col = f'delta_sample_{col}'
+    control_vals = delta_df.loc[delta_df['group_label'] == 'control', delta_col].dropna().to_numpy(dtype=float)
+    stress_vals = delta_df.loc[delta_df['group_label'] == 'stress', delta_col].dropna().to_numpy(dtype=float)
+
+    mean_control = float(np.mean(control_vals)) if len(control_vals) else 0.0
+    corrected_vals = stress_vals - mean_control
+
+    n1, n0 = len(stress_vals), len(control_vals)
+    mean1 = float(np.mean(stress_vals)) if n1 else 0.0
+    mean0 = float(np.mean(control_vals)) if n0 else 0.0
+    var1 = float(np.var(stress_vals, ddof=1)) if n1 > 1 else 0.0
+    var0 = float(np.var(control_vals, ddof=1)) if n0 > 1 else 0.0
+
+    se = math.sqrt((var1 / n1) + (var0 / n0)) if n1 > 1 and n0 > 1 else float('nan')
+    diff = mean1 - mean0
+    t_stat = diff / se if se and se > 0 else float('nan')
+
+    if n1 > 1 and n0 > 1 and se > 0:
+        df_welch_num = (var1 / n1 + var0 / n0) ** 2
+        df_welch_den = ((var1 / n1) ** 2) / (n1 - 1) + ((var0 / n0) ** 2) / (n0 - 1)
+        _df_welch = df_welch_num / df_welch_den if df_welch_den > 0 else float('nan')
+        # Normal approx p-value (iki yönlü) ve %95 CI
+        p_value = float(math.erfc(abs(t_stat) / math.sqrt(2.0)))
+        ci_low = diff - 1.96 * se
+        ci_high = diff + 1.96 * se
+    else:
+        p_value = float('nan')
+        ci_low = float('nan')
+        ci_high = float('nan')
+
+    pooled_den = (n1 + n0 - 2)
+    if n1 > 1 and n0 > 1 and pooled_den > 0:
+        pooled_sd = math.sqrt((((n1 - 1) * var1) + ((n0 - 1) * var0)) / pooled_den)
+        cohen_d = diff / pooled_sd if pooled_sd > 0 else 0.0
+    else:
+        cohen_d = float('nan')
+
+    summary_rows.append({
+        'index_name': col,
+        'delta_control_mean': mean_control,
+        'delta_stress_mean': mean1,
+        'delta_corrected_mean': float(np.mean(corrected_vals)) if len(corrected_vals) else 0.0,
+        'effect_size_cohen_d': float(cohen_d),
+        'p_value': p_value,
+        'ci95_low': float(ci_low),
+        'ci95_high': float(ci_high),
+        'n_control': int(n0),
+        'n_stress': int(n1),
+    })
+
+delta_summary = pd.DataFrame(summary_rows)
+
 OUT_MODEL_PARAMS.parent.mkdir(parents=True, exist_ok=True)
 model_params = {
     'features': ['rg_ratio', 'mean_g', 'glcm_entropy', 'coverage_pct'],
@@ -138,9 +221,23 @@ model_params = {
 OUT_MODEL_PARAMS.write_text(json.dumps(model_params, indent=2), encoding='utf-8')
 
 metrics = {
-    'dataset': {'n_samples': int(len(df)), 'n_stressed': int(df['is_stressed'].sum()), 'n_control': int((1-df['is_stressed']).sum())},
+    'dataset': {
+        'required_fields': required_model_fields,
+        'n_samples': int(len(df)),
+        'n_stressed': int(df['is_stressed'].sum()),
+        'n_control': int((1-df['is_stressed']).sum())
+    },
     'baseline_weighted_threshold': {'weights': weights, 'threshold': threshold, 'roc_auc': float(auc_base), 'sensitivity': float(sens_base), 'specificity': float(spec_base)},
-    'calibrated_logistic': {'threshold': opt_thr, 'roc_auc_test': float(auc_cal), 'sensitivity_test': float(sens_cal), 'specificity_test': float(spec_cal)}
+    'calibrated_logistic': {'threshold': opt_thr, 'roc_auc_test': float(auc_cal), 'sensitivity_test': float(sens_cal), 'specificity_test': float(spec_cal)},
+    'delta_analysis': {
+        'formula': {
+            'delta_sample': 'end-start',
+            'delta_corrected': 'delta_stress - mean(delta_control)'
+        },
+        'start_day': start_day,
+        'end_day': end_day,
+        'per_index': delta_summary.to_dict(orient='records')
+    }
 }
 OUT_METRICS.parent.mkdir(parents=True, exist_ok=True)
 OUT_METRICS.write_text(json.dumps(metrics, indent=2), encoding='utf-8')
@@ -152,7 +249,8 @@ Sabit ağırlıklı erken stres skorunu, kalibre edilmiş lojistik regresyon mod
 
 ## 2) Veri seti
 - Dosya: `backend/data/labeled_control_stress_dataset.csv`
-- Sütunlar: `sample_id`, `day`, `condition`, biyobelirteçler (`chlorophyll_a_mg_g_fw`, `carotenoid_mg_g_fw`, `rgr_g_g_day`) ve görüntü-tabanlı özellikler (`rg_ratio`, `mean_g`, `glcm_entropy`, `coverage_pct`), etiket (`is_stressed`).
+- Zorunlu alanlar: `group_label` (control/stress), `sample_id`, `day_index`
+- Sütunlar: `sample_id`, `day_index`, `group_label`, `condition`, biyobelirteçler (`chlorophyll_a_mg_g_fw`, `carotenoid_mg_g_fw`, `rgr_g_g_day`) ve görüntü-tabanlı özellikler (`rg_ratio`, `mean_g`, `glcm_entropy`, `coverage_pct`), etiket (`is_stressed`).
 - Örnek sayısı: {len(df)}
 
 ## 3) Eski yaklaşım (sabit ağırlık + eşik)
@@ -166,11 +264,18 @@ Sabit ağırlıklı erken stres skorunu, kalibre edilmiş lojistik regresyon mod
 - Specificity (test): {spec_cal:.4f}
 - Karar eşiği (Youden J): {opt_thr:.4f}
 
-## 5) Model sınırlamaları
+## 5) Δ Analizi ve İstatistiksel Rapor
+- Formül: `Δsample = end-start`
+- Düzeltme: `Δcorrected = Δstress - mean(Δcontrol)`
+- Rapor metrikleri (indeks başına): `effect_size_cohen_d`, `p_value`, `ci95_low`, `ci95_high`
+- Ayrıntılar: `backend/reports/stress_model_metrics.json` içindeki `delta_analysis.per_index` alanı.
+
+## 6) Model sınırlamaları
 - Bu veri seti sentetik olup gerçek biyokimyasal ölçümlerle harici doğrulama gerektirir.
+- p-değerleri normal yaklaşım ile yaklaşık hesaplanmıştır.
 - Farklı görüntüleme düzenekleri için yeniden kalibrasyon önerilir.
 
-## 6) Yayınlanan model artefaktları
+## 7) Yayınlanan model artefaktları
 - Model: `backend/models/early_stress_calibrated_logreg_params.json`
 - Metri̇kler: `backend/reports/stress_model_metrics.json`
 """
