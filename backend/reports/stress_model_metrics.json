@@ -1,5 +1,10 @@
 {
   "dataset": {
+    "required_fields": [
+      "group_label",
+      "sample_id",
+      "day_index"
+    ],
     "n_samples": 960,
     "n_stressed": 498,
     "n_control": 462
@@ -21,5 +26,99 @@
     "roc_auc_test": 0.9761540600667408,
     "sensitivity_test": 0.8790322580645161,
     "specificity_test": 0.9482758620689655
+  },
+  "delta_analysis": {
+    "formula": {
+      "delta_sample": "end-start",
+      "delta_corrected": "delta_stress - mean(delta_control)"
+    },
+    "start_day": 0,
+    "end_day": 7,
+    "per_index": [
+      {
+        "index_name": "rg_ratio",
+        "delta_control_mean": 0.0965735714336121,
+        "delta_stress_mean": 0.12164061188501801,
+        "delta_corrected_mean": 0.025067040451405915,
+        "effect_size_cohen_d": 0.28657332128972235,
+        "p_value": 0.17490926651729752,
+        "ci95_low": -0.011149607514716928,
+        "ci95_high": 0.06128368841752875,
+        "n_control": 30,
+        "n_stress": 90
+      },
+      {
+        "index_name": "mean_g",
+        "delta_control_mean": -0.0809240457334436,
+        "delta_stress_mean": -0.0841409903147552,
+        "delta_corrected_mean": -0.0032169445813116163,
+        "effect_size_cohen_d": -0.04610252732582157,
+        "p_value": 0.7984591036478103,
+        "ci95_low": -0.027910163330116644,
+        "ci95_high": 0.021476274167493425,
+        "n_control": 30,
+        "n_stress": 90
+      },
+      {
+        "index_name": "glcm_entropy",
+        "delta_control_mean": 0.0849202373985498,
+        "delta_stress_mean": 0.11562667409876318,
+        "delta_corrected_mean": 0.030706436700213367,
+        "effect_size_cohen_d": 0.31638828514435674,
+        "p_value": 0.0711590814841665,
+        "ci95_low": -0.0026468022209344966,
+        "ci95_high": 0.06405967562136125,
+        "n_control": 30,
+        "n_stress": 90
+      },
+      {
+        "index_name": "coverage_pct",
+        "delta_control_mean": -6.7756376506835965,
+        "delta_stress_mean": -7.67387599256811,
+        "delta_corrected_mean": -0.8982383418845146,
+        "effect_size_cohen_d": -0.13427133109396858,
+        "p_value": 0.49445470233236327,
+        "ci95_low": -3.474997778253663,
+        "ci95_high": 1.6785210944846356,
+        "n_control": 30,
+        "n_stress": 90
+      },
+      {
+        "index_name": "chlorophyll_a_mg_g_fw",
+        "delta_control_mean": -0.27781510209615995,
+        "delta_stress_mean": -0.4209750728887603,
+        "delta_corrected_mean": -0.14315997079260032,
+        "effect_size_cohen_d": -0.4531767717616418,
+        "p_value": 0.026668909691363794,
+        "ci95_low": -0.2697627521521435,
+        "ci95_high": -0.016557189433057146,
+        "n_control": 30,
+        "n_stress": 90
+      },
+      {
+        "index_name": "carotenoid_mg_g_fw",
+        "delta_control_mean": 0.08902639417318535,
+        "delta_stress_mean": 0.12133748398801533,
+        "delta_corrected_mean": 0.03231108981482997,
+        "effect_size_cohen_d": 0.23629450609012717,
+        "p_value": 0.2711397415626416,
+        "ci95_low": -0.025238291625992858,
+        "ci95_high": 0.08986047125565283,
+        "n_control": 30,
+        "n_stress": 90
+      },
+      {
+        "index_name": "rgr_g_g_day",
+        "delta_control_mean": -0.02318655687493138,
+        "delta_stress_mean": -0.027732890641015265,
+        "delta_corrected_mean": -0.004546333766083881,
+        "effect_size_cohen_d": -0.19719221806252454,
+        "p_value": 0.32302884015278,
+        "ci95_low": -0.013563069062520436,
+        "ci95_high": 0.004470401530352669,
+        "n_control": 30,
+        "n_stress": 90
+      }
+    ]
   }
 }
