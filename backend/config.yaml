@@ -116,3 +116,24 @@ output:
   base_dir: "./results"
   experiment_id: "azolla_exp_001"
   media_prefix: "/media"
+
+summary_report_rules:
+  trend_rule:
+    metric: early_stress_prob
+    window_frames: 5
+    slope_threshold: 0.03
+    confidence: 0.82
+  threshold_duration_rule:
+    metric: early_stress_prob
+    threshold: 0.70
+    min_frames: 3
+    confidence: 0.86
+  combined_rule:
+    qc_reliable_ratio_min: 0.80
+    risk_score_min: 67
+    confidence: 0.78
+  contradiction_rule:
+    stress_threshold: 0.70
+    max_coverage_support: 45
+    max_browning_support: 12
+    confidence: 0.74

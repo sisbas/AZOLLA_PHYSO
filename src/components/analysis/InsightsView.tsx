@@ -34,9 +34,21 @@ export function InsightsView({ model }: { model: any }) {
         <div className="rounded-2xl border border-slate-100 bg-white p-5 mb-6">
           <div className="flex items-center gap-2 mb-4"><Sparkles size={14} className="text-amber-500" /><h3 className={analysisTypography.cardTitle}>Deterministik Bulgular</h3></div>
           <div className="space-y-2">
-            {summaryReport.findings.map((finding: string, index: number) => (
-              <div key={index} className="rounded-xl bg-slate-50 border border-slate-100 p-3 text-sm font-semibold leading-relaxed text-slate-700">{finding}</div>
-            ))}
+            {summaryReport.findings.map((finding: any, index: number) => {
+              const normalized = typeof finding === 'string'
+                ? { finding_text: finding, evidence: 'Kanıt mevcut değil', confidence: 0.5 }
+                : finding;
+
+              return (
+                <div key={index} className="rounded-xl bg-slate-50 border border-slate-100 p-3">
+                  <div className="text-sm font-semibold leading-relaxed text-slate-700">{normalized.finding_text}</div>
+                  <div className="mt-1 text-xs font-medium text-slate-500">Kanıt: {normalized.evidence}</div>
+                  <span className="mt-2 inline-flex items-center rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-bold text-indigo-700">
+                    Güven: %{(Math.max(0, Math.min(1, normalized.confidence)) * 100).toFixed(0)}
+                  </span>
+                </div>
+              );
+            })}
           </div>
           <p className="mt-4 text-xs font-bold text-slate-400">
             Bu rapor, AI yorumundan bağımsız olarak {summaryReport.successfulFrames}/{summaryReport.totalFrames} başarılı zaman çizelgesi karesi üzerinden hesaplandı.
