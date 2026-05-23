@@ -157,6 +157,37 @@ class AzollaPipeline:
 
     def run_series(self, frames: List[Tuple[np.ndarray, str]], experiment_id: str) -> Dict[str, Any]:
         """Runs the pipeline over a time-series and applies temporal decision engine."""
+        def rolling_stats(values: pd.Series, window: int = 3) -> Tuple[List[float], List[float]]:
+            moving_avg = values.rolling(window=window, min_periods=1).mean().fillna(0.0)
+            moving_std = values.rolling(window=window, min_periods=1).std(ddof=0).fillna(0.0)
+            return moving_avg.tolist(), moving_std.tolist()
+
+        def robust_z_scores(values: pd.Series) -> List[float]:
+            arr = values.to_numpy(dtype=float)
+            median = float(np.nanmedian(arr)) if arr.size else 0.0
+            mad = float(np.nanmedian(np.abs(arr - median))) if arr.size else 0.0
+            scale = 1.4826 * mad + 1e-9
+            return (((arr - median) / scale)).tolist()
+
+        def detect_change_points(values: pd.Series, threshold_multiplier: float = 5.0) -> List[int]:
+            arr = values.to_numpy(dtype=float)
+            if arr.size < 3:
+                return []
+            mean = float(np.mean(arr))
+            std = float(np.std(arr)) + 1e-9
+            pos_cusum = 0.0
+            neg_cusum = 0.0
+            threshold = threshold_multiplier * std
+            change_points = []
+            for i, val in enumerate(arr):
+                centered = val - mean
+                pos_cusum = max(0.0, pos_cusum + centered)
+                neg_cusum = min(0.0, neg_cusum + centered)
+                if pos_cusum > threshold or abs(neg_cusum) > threshold:
+                    change_points.append(i)
+                    pos_cusum = 0.0
+                    neg_cusum = 0.0
+            return sorted(set(change_points))
         def parse_frame_timestamp(timestamp: str):
             """Parse frame timestamps into datetimes for chronological ordering."""
             if timestamp is None:
@@ -272,6 +303,40 @@ class AzollaPipeline:
                     res['metrics']['early_stress_prob'] = decision_data['early_stress_prob']
                 res['errors'].extend(decision_data.get('errors', []))
 
+            timeline_df = pd.DataFrame({
+                "coverage": [r.get("metrics", {}).get("coverage_pct", np.nan) for r in results_list],
+                "frond_count": [r.get("metrics", {}).get("frond_count", np.nan) for r in results_list],
+                "stress_score": [r.get("phenotyping", {}).get("stres_analizi", {}).get("stress_score", np.nan) for r in results_list],
+            }).apply(pd.to_numeric, errors='coerce')
+
+            series_signals: Dict[str, Any] = {}
+            for metric_key in ["coverage", "frond_count", "stress_score"]:
+                values = timeline_df[metric_key].fillna(method='ffill').fillna(method='bfill').fillna(0.0)
+                moving_avg, moving_std = rolling_stats(values, window=3)
+                anomaly_scores = robust_z_scores(values)
+                anomaly_flags = [abs(score) >= 3.5 for score in anomaly_scores]
+                change_points = detect_change_points(values)
+                series_signals[metric_key] = {
+                    "moving_avg": moving_avg,
+                    "moving_std": moving_std,
+                    "anomaly_scores": anomaly_scores,
+                    "anomaly_flags": anomaly_flags,
+                    "change_points": change_points,
+                }
+
+            for i, res in enumerate(results_list):
+                per_frame = {}
+                for metric_key in ["coverage", "frond_count", "stress_score"]:
+                    signal = series_signals[metric_key]
+                    per_frame[metric_key] = {
+                        "moving_avg": signal["moving_avg"][i],
+                        "moving_std": signal["moving_std"][i],
+                        "anomaly_score": signal["anomaly_scores"][i],
+                        "anomaly_flag": signal["anomaly_flags"][i],
+                        "change_point": i in signal["change_points"],
+                    }
+                res["time_series_signals"] = per_frame
+
             metadata = self.val.generate_metadata(hash(str(self.config)))
             metadata['decision'] = {
                 "early_weights": self.config.get('decision', {}).get('early_weights', {}),
@@ -283,6 +348,7 @@ class AzollaPipeline:
             return {
                 "experiment_id": experiment_id,
                 "timeline": results_list,
+                "time_series_signals": series_signals,
                 "validation": val_report,
                 "metadata": metadata
             }
