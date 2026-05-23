@@ -5,7 +5,9 @@ import { analysisTypography } from './typography';
 import { analysisCardTokens, analysisStateTokens } from './visualTokens';
 
 export function QcSummaryPanel({ model }: { model: any }) {
-  const { currentFrame, qcRows, qcHasDetailedData, qcSummary, qcStatusNotes, errorSeverityEntries, compositeRisk } = model;
+  const { currentFrame, qcRows, qcHasDetailedData, qcSummary, qcStatusNotes, errorSeverityEntries, compositeRisk, qcConfidence, qcConfidenceInterval } = model;
+  const confidencePct = typeof qcConfidence === 'number' ? Math.round(qcConfidence * 100) : null;
+  const lowConfidence = typeof qcConfidence === 'number' && qcConfidence < 0.6;
   const blendedLabel = (() => {
     const score = compositeRisk?.score;
     if (typeof score !== 'number') return qcSummary.label;
@@ -26,9 +28,14 @@ export function QcSummaryPanel({ model }: { model: any }) {
         <div>
           <div className="flex items-center gap-2">
             <ListChecks size={14} className="text-slate-500" />
-            <h3 className={cn(analysisTypography.sectionLabel, 'text-slate-400')}>QC / Güvenilirlik</h3>
+            <h3 className={cn(analysisTypography.sectionLabel, 'text-slate-400')}>QC / Güvenilirlik {confidencePct !== null ? `· Güven %${confidencePct}` : ''}</h3>
           </div>
           <p className="text-sm text-slate-500 mt-1 leading-relaxed">Segmentasyon, maske optimizasyonu ve pipeline durum kontrolü</p>
+          {qcConfidenceInterval?.lower !== undefined && qcConfidenceInterval?.upper !== undefined ? (
+            <p className="text-xs text-slate-400 mt-1">
+              GA95: %{Math.round(qcConfidenceInterval.lower * 100)} - %{Math.round(qcConfidenceInterval.upper * 100)}
+            </p>
+          ) : null}
         </div>
         <span className={cn(
           'px-3 py-1.5 rounded-full border text-xs font-black shrink-0',
@@ -45,6 +52,12 @@ export function QcSummaryPanel({ model }: { model: any }) {
           Bu pipeline çıktısında QC alanı yok.
         </div>
       )}
+
+      {lowConfidence ? (
+        <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs font-bold text-amber-800 mb-4">
+          Düşük güven: Bu skorun belirsizliği yüksek, karar öncesi manuel QC doğrulaması önerilir.
+        </div>
+      ) : null}
 
       <div className="space-y-3 relative">
         {qcRows.map((row: any) => (

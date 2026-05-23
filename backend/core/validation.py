@@ -6,6 +6,8 @@ import pandas as pd
 from typing import Dict, Any, List
 from pathlib import Path
 from sklearn.model_selection import TimeSeriesSplit
+from sklearn.isotonic import IsotonicRegression
+from sklearn.linear_model import LogisticRegression
 
 class ValidationModule:
     """
@@ -66,3 +68,76 @@ class ValidationModule:
         except Exception as e:
             logging.error(f"Bootstrap failure: {str(e)}")
             return {}
+
+    def reliability_targets(self, history: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Build reliability calibration set from labeled historical examples.
+        Expected keys per item: raw_score (0-1) and label (0/1 or bool).
+        """
+        scores: List[float] = []
+        labels: List[int] = []
+        for item in history or []:
+            raw = item.get("raw_score")
+            label = item.get("label")
+            if raw is None or label is None:
+                continue
+            try:
+                score = float(raw)
+            except (TypeError, ValueError):
+                continue
+            if isinstance(label, bool):
+                lbl = int(label)
+            else:
+                try:
+                    lbl = int(label)
+                except (TypeError, ValueError):
+                    continue
+            if lbl not in (0, 1):
+                continue
+            scores.append(float(np.clip(score, 0.0, 1.0)))
+            labels.append(lbl)
+        return {"scores": scores, "labels": labels, "count": len(scores)}
+
+    def calibrate_scores(
+        self,
+        raw_scores: List[float],
+        reliability_data: Dict[str, Any],
+        method: str = "isotonic",
+    ) -> Dict[str, Any]:
+        """
+        Calibrate raw QC scores with isotonic regression or Platt scaling.
+        Falls back to identity mapping if data is insufficient.
+        """
+        clipped_raw = [float(np.clip(v, 0.0, 1.0)) for v in raw_scores]
+        scores = np.array(reliability_data.get("scores", []), dtype=float)
+        labels = np.array(reliability_data.get("labels", []), dtype=int)
+        n = int(reliability_data.get("count", 0))
+        if n < 8 or len(np.unique(labels)) < 2:
+            return {
+                "method": "identity",
+                "calibrated_scores": clipped_raw,
+                "training_count": n,
+                "warning": "Insufficient labeled reliability data for calibration.",
+            }
+        try:
+            if method == "platt":
+                model = LogisticRegression(max_iter=1000)
+                model.fit(scores.reshape(-1, 1), labels)
+                calibrated = model.predict_proba(np.array(clipped_raw).reshape(-1, 1))[:, 1].tolist()
+            else:
+                model = IsotonicRegression(out_of_bounds="clip")
+                model.fit(scores, labels)
+                calibrated = model.predict(np.array(clipped_raw)).tolist()
+            return {
+                "method": method,
+                "calibrated_scores": [float(np.clip(v, 0.0, 1.0)) for v in calibrated],
+                "training_count": n,
+            }
+        except Exception as e:
+            logging.error(f"Calibration failure ({method}): {str(e)}")
+            return {
+                "method": "identity",
+                "calibrated_scores": clipped_raw,
+                "training_count": n,
+                "warning": str(e),
+            }
