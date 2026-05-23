@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import base64
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Any, Dict, Tuple
+from datetime import datetime, date
+from typing import Any, Dict, Tuple, Optional
 import logging
 
 import cv2
@@ -67,7 +67,49 @@ class AzollaPhenotypingService:
             return ""
         return "data:image/png;base64," + base64.b64encode(enc.tobytes()).decode("utf-8")
 
-    def analyze(self, image: np.ndarray, pool_area_m2: float = 16.0) -> Dict[str, Any]:
+    @staticmethod
+    def parse_date(value: str, field_name: str) -> date:
+        """Parse YYYY-MM-DD date text into a date object."""
+        try:
+            return datetime.strptime(value, "%Y-%m-%d").date()
+        except ValueError as exc:
+            raise ValueError(
+                f"Geçersiz {field_name} formatı: '{value}'. Beklenen format: YYYY-MM-DD."
+            ) from exc
+
+    @staticmethod
+    def calculate_date_diff(start_date: date, end_date: date) -> Dict[str, Any]:
+        """Calculate date-only difference (timezone-independent)."""
+        days_diff = (end_date - start_date).days
+        return {
+            "days_diff": days_diff,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+        }
+
+    def validate_date_inputs(
+        self,
+        start_date: Optional[str],
+        end_date: Optional[str],
+    ) -> Tuple[Optional[date], Optional[date]]:
+        if (start_date and not end_date) or (end_date and not start_date):
+            raise ValueError("start_date ve end_date birlikte gönderilmelidir (ikisi de opsiyonel).")
+        if not start_date and not end_date:
+            return None, None
+
+        parsed_start = self.parse_date(start_date, "start_date")
+        parsed_end = self.parse_date(end_date, "end_date")
+        if parsed_start > parsed_end:
+            raise ValueError("Geçersiz tarih aralığı: start_date, end_date değerinden büyük olamaz.")
+        return parsed_start, parsed_end
+
+    def analyze(
+        self,
+        image: np.ndarray,
+        pool_area_m2: float = 16.0,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+    ) -> Dict[str, Any]:
         try:
             logger.info(f"Starting analysis for image with shape {image.shape}, pool_area: {pool_area_m2} m²")
 
@@ -111,6 +153,8 @@ class AzollaPhenotypingService:
                 "isolated_rgb_png": self._png_base64(isolated_rgb),
                 "overlay_png": self._png_base64(overlay_rgb),
             }
+            if start_date is not None and end_date is not None:
+                result["date_comparison"] = self.calculate_date_diff(start_date, end_date)
 
             logger.info("Phenotyping analysis completed successfully")
             return result
