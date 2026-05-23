@@ -250,8 +250,12 @@ async def analyze_phenotyping(
             start_date=parsed_start_date,
             end_date=parsed_end_date,
         )
+        response_payload = {
+            "schema_version": "1.0.0",
+            "data": result,
+        }
         logger.info("Phenotyping analysis completed successfully")
-        return result
+        return response_payload
     except HTTPException:
         raise
     except Exception as e:
