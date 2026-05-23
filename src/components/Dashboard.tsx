@@ -306,6 +306,12 @@ const COMPARE_METRICS: CompareMetricConfig[] = [
   { key: 'fresh_biomass_g_m2', label: 'Taze Biyokütle', unit: 'g/m²', digits: 1 },
 ];
 
+interface CompareFrameValidationSummary {
+  missingMetricLabels: string[];
+  availableMetricCount: number;
+  totalMetricCount: number;
+}
+
 const getNumericValue = (value: unknown): number | null => {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string' && value.trim() !== '') {
@@ -313,6 +319,21 @@ const getNumericValue = (value: unknown): number | null => {
     return Number.isFinite(parsed) ? parsed : null;
   }
   return null;
+};
+
+const validateCompareFrameMetrics = (frame: any): CompareFrameValidationSummary => {
+  const missingMetricLabels = COMPARE_METRICS
+    .filter((metric) => getNumericValue(frame?.metrics?.[metric.key]) === null)
+    .map((metric) => metric.label);
+
+  const totalMetricCount = COMPARE_METRICS.length;
+  const availableMetricCount = totalMetricCount - missingMetricLabels.length;
+
+  return {
+    missingMetricLabels,
+    availableMetricCount,
+    totalMetricCount,
+  };
 };
 
 type DecisionContributionKey = 'rg_ratio' | 'mean_g' | 'glcm_entropy';
@@ -1483,6 +1504,13 @@ export default function Dashboard({ taskId }: DashboardProps) {
       percentChange,
     };
   });
+  const compareStartValidation = validateCompareFrameMetrics(compareStartFrame);
+  const compareEndValidation = validateCompareFrameMetrics(compareEndFrame);
+  const compareValidation = {
+    start: compareStartValidation,
+    end: compareEndValidation,
+    hasMissingMetrics: compareStartValidation.missingMetricLabels.length > 0 || compareEndValidation.missingMetricLabels.length > 0,
+  };
   const comparePrimaryDelta = compareRows.find((metric) => metric.key === 'coverage_pct') ?? compareRows.find((metric) => metric.hasData);
   const compareDeltaBadgeLabel = comparePrimaryDelta && comparePrimaryDelta.delta !== null
     ? `${comparePrimaryDelta.label} Δ ${formatCompareValue(comparePrimaryDelta.delta, comparePrimaryDelta, { signed: true, delta: true })}`
@@ -1608,6 +1636,7 @@ export default function Dashboard({ taskId }: DashboardProps) {
     compareEndFrame,
     compareTimeDeltaLabel,
     compareRows,
+    compareValidation,
     comparePrimaryDelta,
     currentPhenotyping,
     currentFrondCount,
