@@ -23,6 +23,7 @@ export function FrameComparisonPanel({ model }: { model: any }) {
     compareEndFrame,
     compareTimeDeltaLabel,
     compareRows,
+    compareValidation,
     comparePrimaryDelta,
     getCompareImageUrl,
     formatFrameDateLabel,
@@ -101,6 +102,13 @@ export function FrameComparisonPanel({ model }: { model: any }) {
               <div className="text-3xl font-black tabular-nums text-slate-900">{formatSignedNumber(comparePrimaryDelta?.delta ?? null, 1, comparePrimaryDelta?.unit ?? '')}</div>
               <p className="text-sm font-semibold text-slate-500 mt-1">{comparePrimaryDelta?.label ?? 'Birincil metrik'} · {compareTimeDeltaLabel}</p>
             </div>
+            {compareValidation?.hasMissingMetrics ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                <p className="font-black mb-1">Eksik metrik tespit edildi</p>
+                <p className="font-semibold">Başlangıç: {compareValidation.start.availableMetricCount}/{compareValidation.start.totalMetricCount} metrik dolu</p>
+                <p className="font-semibold">Bitiş: {compareValidation.end.availableMetricCount}/{compareValidation.end.totalMetricCount} metrik dolu</p>
+              </div>
+            ) : null}
             <div className="space-y-3">
               {compareRows.map((row: any) => (
                 <div key={row.key} className="rounded-xl bg-white border border-white p-3 shadow-sm">
