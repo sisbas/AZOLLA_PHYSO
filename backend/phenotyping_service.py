@@ -150,7 +150,7 @@ class AzollaPhenotypingService:
         group_warnings: Dict[str, list[str]] = {}
 
         for item in results_with_meta:
-            group_name = str(item.get("group_name") or "unknown")
+            group_name = str(item.get("group_name") or "unknown").strip() or "unknown"
             timepoint = str(item.get("timepoint") or "").strip().lower()
             result = item.get("result", {})
 
@@ -195,6 +195,8 @@ class AzollaPhenotypingService:
                 warnings.append("Bu grupta before verisi yok.")
             if after_summary.get("count", 0) == 0:
                 warnings.append("Bu grupta after verisi yok.")
+            if not change_summary["metrics"] and before_summary.get("count", 0) > 0 and after_summary.get("count", 0) > 0:
+                warnings.append("before/after mevcut ancak ortak metrik bulunamadığı için değişim hesaplanamadı.")
 
             comparisons.append({
                 "group_name": group_name,

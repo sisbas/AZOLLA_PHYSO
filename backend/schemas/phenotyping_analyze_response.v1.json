@@ -3,59 +3,135 @@
   "$id": "https://azolla.local/schemas/phenotyping/analyze-response/v1",
   "title": "PhenotypingAnalyzeResponseV1",
   "type": "object",
-  "required": ["schema_version", "data"],
+  "required": [
+    "schema_version",
+    "data"
+  ],
   "properties": {
-    "schema_version": {"type": "string", "const": "1.0.0"},
+    "schema_version": {
+      "type": "string",
+      "const": "1.0.0"
+    },
     "data": {
       "type": "object",
-      "required": ["results", "group_comparisons"],
+      "required": [
+        "results",
+        "group_comparisons"
+      ],
       "properties": {
         "results": {
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["file_name", "group_name", "timepoint", "result"],
+            "required": [
+              "file_name",
+              "group_name",
+              "timepoint",
+              "result"
+            ],
             "properties": {
-              "file_name": {"type": ["string", "null"]},
-              "group_name": {"type": "string"},
-              "timepoint": {"type": "string"},
-              "replicate_id": {"type": ["string", "null"]},
+              "file_name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "group_name": {
+                "type": "string"
+              },
+              "timepoint": {
+                "type": "string"
+              },
+              "replicate_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "result": {
                 "type": "object",
                 "required": [
-                  "segmentasyon", "renk_indeksleri", "stres_analizi", "yogunluk_dagilimi",
-                  "doku_analizi", "biyokutle_tahmini", "buyume_parametreleri", "images", "timestamp"
+                  "segmentasyon",
+                  "renk_indeksleri",
+                  "stres_analizi",
+                  "yogunluk_dagilimi",
+                  "doku_analizi",
+                  "biyokutle_tahmini",
+                  "buyume_parametreleri",
+                  "images",
+                  "timestamp"
                 ],
                 "properties": {
-                  "segmentasyon": {"type": "object"},
-                  "renk_indeksleri": {"type": "object"},
-                  "stres_analizi": {"type": "object"},
-                  "yogunluk_dagilimi": {"type": "object"},
-                  "doku_analizi": {"type": "object"},
-                  "biyokutle_tahmini": {"type": "object"},
-                  "buyume_parametreleri": {"type": "object"},
+                  "segmentasyon": {
+                    "type": "object"
+                  },
+                  "renk_indeksleri": {
+                    "type": "object"
+                  },
+                  "stres_analizi": {
+                    "type": "object"
+                  },
+                  "yogunluk_dagilimi": {
+                    "type": "object"
+                  },
+                  "doku_analizi": {
+                    "type": "object"
+                  },
+                  "biyokutle_tahmini": {
+                    "type": "object"
+                  },
+                  "buyume_parametreleri": {
+                    "type": "object"
+                  },
                   "date_comparison": {
                     "type": "object",
-                    "required": ["days_diff", "start_date", "end_date"],
+                    "required": [
+                      "days_diff",
+                      "start_date",
+                      "end_date"
+                    ],
                     "properties": {
-                      "days_diff": {"type": "integer"},
-                      "start_date": {"type": "string", "format": "date"},
-                      "end_date": {"type": "string", "format": "date"}
+                      "days_diff": {
+                        "type": "integer"
+                      },
+                      "start_date": {
+                        "type": "string",
+                        "format": "date"
+                      },
+                      "end_date": {
+                        "type": "string",
+                        "format": "date"
+                      }
                     },
                     "additionalProperties": true
                   },
                   "images": {
                     "type": "object",
-                    "required": ["preprocessed_rgb_png", "binary_mask_png", "isolated_rgb_png", "overlay_png"],
+                    "required": [
+                      "preprocessed_rgb_png",
+                      "binary_mask_png",
+                      "isolated_rgb_png",
+                      "overlay_png"
+                    ],
                     "properties": {
-                      "preprocessed_rgb_png": {"type": "string"},
-                      "binary_mask_png": {"type": "string"},
-                      "isolated_rgb_png": {"type": "string"},
-                      "overlay_png": {"type": "string"}
+                      "preprocessed_rgb_png": {
+                        "type": "string"
+                      },
+                      "binary_mask_png": {
+                        "type": "string"
+                      },
+                      "isolated_rgb_png": {
+                        "type": "string"
+                      },
+                      "overlay_png": {
+                        "type": "string"
+                      }
                     },
                     "additionalProperties": false
                   },
-                  "timestamp": {"type": "string"}
+                  "timestamp": {
+                    "type": "string"
+                  }
                 },
                 "additionalProperties": true
               }
@@ -67,15 +143,129 @@
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["group_name", "before_summary", "after_summary", "change_summary", "warnings"],
+            "required": [
+              "group_name",
+              "before_summary",
+              "after_summary",
+              "change_summary",
+              "warnings"
+            ],
             "properties": {
-              "group_name": {"type": "string"},
-              "before_summary": {"type": "object"},
-              "after_summary": {"type": "object"},
-              "change_summary": {"type": "object"},
+              "group_name": {
+                "type": "string"
+              },
+              "before_summary": {
+                "type": "object",
+                "required": [
+                  "count",
+                  "metrics"
+                ],
+                "properties": {
+                  "count": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "metrics": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "required": [
+                        "mean",
+                        "median",
+                        "count"
+                      ],
+                      "properties": {
+                        "mean": {
+                          "type": "number"
+                        },
+                        "median": {
+                          "type": "number"
+                        },
+                        "count": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "additionalProperties": false
+              },
+              "after_summary": {
+                "type": "object",
+                "required": [
+                  "count",
+                  "metrics"
+                ],
+                "properties": {
+                  "count": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "metrics": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "required": [
+                        "mean",
+                        "median",
+                        "count"
+                      ],
+                      "properties": {
+                        "mean": {
+                          "type": "number"
+                        },
+                        "median": {
+                          "type": "number"
+                        },
+                        "count": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "additionalProperties": false
+              },
+              "change_summary": {
+                "type": "object",
+                "required": [
+                  "metrics"
+                ],
+                "properties": {
+                  "metrics": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "required": [
+                        "delta",
+                        "pct_change"
+                      ],
+                      "properties": {
+                        "delta": {
+                          "type": "number"
+                        },
+                        "pct_change": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "additionalProperties": false
+              },
               "warnings": {
                 "type": "array",
-                "items": {"type": "string"}
+                "items": {
+                  "type": "string"
+                }
               }
             },
             "additionalProperties": false
