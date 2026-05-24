@@ -7,7 +7,49 @@ interface UploadPanelProps {
   onComplete: (taskId: string) => void;
 }
 
+type Timepoint = 'before' | 'after' | 'unknown';
+
+interface ParsedExperimentMeta {
+  groupName: string;
+  timepoint: Timepoint;
+  confidence: 'high' | 'low';
+  errorLabel?: string;
+}
+
+interface UploadFileModel {
+  file: File;
+  groupName: string;
+  timepoint: Timepoint;
+  parsedMeta: ParsedExperimentMeta;
+}
+
 const toIsoTimestamp = (date: Date) => date.toISOString();
+
+const parseExperimentMetaFromFilename = (filename: string): ParsedExperimentMeta => {
+  const normalized = filename
+    .toLowerCase()
+    .replace(/\.[^/.]+$/, '')
+    .replace(/[^a-z0-9çğıöşü]+/gi, '_');
+
+  const groupMatch = normalized.match(/(kontrol\d+|control\d+|group\d+|grup\d+|[a-zçğıöşü]+\d*)/i);
+  const beforeMatch = /(?:oncesi|once|before)/i.test(normalized);
+  const afterMatch = /(?:sonrasi|sonra|after)/i.test(normalized);
+
+  if (groupMatch && (beforeMatch || afterMatch)) {
+    return {
+      groupName: groupMatch[1].toLowerCase(),
+      timepoint: beforeMatch ? 'before' : 'after',
+      confidence: 'high',
+    };
+  }
+
+  return {
+    groupName: 'unassigned',
+    timepoint: 'unknown',
+    confidence: 'low',
+    errorLabel: 'otomatik eşleşmedi',
+  };
+};
 
 const timestampFromFilename = (filename: string): string | null => {
   const patterns: RegExp[] = [
@@ -72,6 +114,46 @@ export default function UploadPanel({ onComplete }: UploadPanelProps) {
   const [pipelineStage, setPipelineStage] = useState<string>('queued');
   const [currentFile, setCurrentFile] = useState<string>('');
   const [error, setError] = useState<{ message: string; remediation?: string } | null>(null);
+  const [manualMetaOverrides, setManualMetaOverrides] = useState<Record<string, { groupName: string; timepoint: Timepoint }>>({});
+
+  const getFileKey = (file: File) => `${file.name}-${file.size}-${file.lastModified}`;
+
+  const uploadModels: UploadFileModel[] = [
+    ...firstDateFiles.map((file) => {
+      const parsedMeta = parseExperimentMetaFromFilename(file.name);
+      const manualOverride = manualMetaOverrides[getFileKey(file)];
+      return {
+        file,
+        groupName: manualOverride?.groupName ?? parsedMeta.groupName,
+        timepoint: manualOverride?.timepoint ?? parsedMeta.timepoint,
+        parsedMeta,
+      };
+    }),
+    ...secondDateFiles.map((file) => {
+      const parsedMeta = parseExperimentMetaFromFilename(file.name);
+      const manualOverride = manualMetaOverrides[getFileKey(file)];
+      return {
+        file,
+        groupName: manualOverride?.groupName ?? parsedMeta.groupName,
+        timepoint: manualOverride?.timepoint ?? parsedMeta.timepoint,
+        parsedMeta,
+      };
+    }),
+  ];
+
+  const updateUploadModel = (file: File, patch: Partial<Pick<UploadFileModel, 'groupName' | 'timepoint'>>) => {
+    const key = getFileKey(file);
+    setManualMetaOverrides((prev) => {
+      const base = prev[key] ?? { groupName: parseExperimentMetaFromFilename(file.name).groupName, timepoint: parseExperimentMetaFromFilename(file.name).timepoint };
+      return {
+        ...prev,
+        [key]: {
+          groupName: patch.groupName ?? base.groupName,
+          timepoint: patch.timepoint ?? base.timepoint,
+        },
+      };
+    });
+  };
 
   const handleFileChange = (target: 'first' | 'second') => (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files) return;
@@ -82,6 +164,7 @@ export default function UploadPanel({ onComplete }: UploadPanelProps) {
     } else {
       setSecondDateFiles(selectedFiles);
     }
+    setManualMetaOverrides({});
     setError(null);
   };
 
@@ -98,15 +181,17 @@ export default function UploadPanel({ onComplete }: UploadPanelProps) {
     }
     
     const formData = new FormData();
-    const orderedFiles = [
-      ...firstDateFiles.map((file) => ({ file, group: 'first_date' })),
-      ...secondDateFiles.map((file) => ({ file, group: 'second_date' })),
-    ].sort((a, b) => timestampForFile(a.file).localeCompare(timestampForFile(b.file)));
+    const orderedFiles = uploadModels
+      .map((model, fileIndex) => ({ ...model, fileIndex }))
+      .sort((a, b) => timestampForFile(a.file).localeCompare(timestampForFile(b.file)));
 
-    orderedFiles.forEach(({ file, group }) => {
+    orderedFiles.forEach(({ file, fileIndex, groupName, timepoint }) => {
       formData.append('images', file);
       formData.append('timestamps', timestampForFile(file));
-      formData.append('groups', group);
+      formData.append('groups', timepoint === 'before' ? 'first_date' : timepoint === 'after' ? 'second_date' : 'unknown');
+      formData.append('group_name[]', groupName);
+      formData.append('timepoint[]', timepoint);
+      formData.append('file_index[]', String(fileIndex));
     });
     formData.append('experiment_id', `EXP-${Date.now()}`);
 
@@ -294,10 +379,7 @@ export default function UploadPanel({ onComplete }: UploadPanelProps) {
           </div>
           
           <div className="space-y-2 max-h-56 overflow-y-auto pr-3 scrollbar-thin scrollbar-thumb-slate-200">
-            {[
-              ...firstDateFiles.map((file) => ({ file, group: 'İlk Tarih' })),
-              ...secondDateFiles.map((file) => ({ file, group: 'İkinci Tarih' })),
-            ].map(({ file, group }, i) => {
+            {uploadModels.map(({ file, groupName, timepoint, parsedMeta }, i) => {
               const dateMetadata = fileDateMetadata(file);
 
               return (
@@ -307,8 +389,16 @@ export default function UploadPanel({ onComplete }: UploadPanelProps) {
                       <FileCode size={14} />
                     </div>
                     <div className="min-w-0 space-y-1">
-                      <span className="inline-flex items-center rounded-full bg-slate-900 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-white">{group}</span>
+                      <span className="inline-flex items-center rounded-full bg-slate-900 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-white">{groupName}</span>
                       <span className="block truncate text-xs font-bold text-slate-700 sm:max-w-[240px]">{file.name}</span>
+                      <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-700">
+                        Zaman: {timepoint}
+                      </span>
+                      {parsedMeta.confidence === 'low' && (
+                        <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-700">
+                          {parsedMeta.errorLabel}
+                        </span>
+                      )}
                       {dateMetadata.detectedDate ? (
                         <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-emerald-700">
                           <CalendarDays size={10} /> Tarih: {dateMetadata.detectedDate}
@@ -327,6 +417,57 @@ export default function UploadPanel({ onComplete }: UploadPanelProps) {
                 </div>
               );
             })}
+          </div>
+
+          <div className="space-y-3 rounded-xl border border-slate-200 p-4">
+            <h3 className="text-xs font-black uppercase tracking-wider text-slate-700">Grup Eşleme</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[720px] text-left text-xs">
+                <thead>
+                  <tr className="border-b border-slate-200 text-slate-500">
+                    <th className="py-2 pr-3">Dosya adı</th>
+                    <th className="py-2 pr-3">Otomatik Grup</th>
+                    <th className="py-2 pr-3">Zaman Noktası</th>
+                    <th className="py-2">Manuel Düzeltme</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {uploadModels.map((model, index) => (
+                    <tr key={`${model.file.name}-${index}`} className="border-b border-slate-100 align-top">
+                      <td className="py-2 pr-3 font-semibold text-slate-700">{model.file.name}</td>
+                      <td className="py-2 pr-3">
+                        <span className="font-mono">{model.parsedMeta.groupName}</span>
+                      </td>
+                      <td className="py-2 pr-3">
+                        <span className="font-mono">{model.parsedMeta.timepoint}</span>
+                      </td>
+                      <td className="py-2">
+                        <div className="flex gap-2">
+                          <select
+                            className="rounded-md border border-slate-300 bg-white px-2 py-1"
+                            value={model.groupName}
+                            onChange={(e) => updateUploadModel(model.file, { groupName: e.target.value })}
+                          >
+                            {[model.groupName, 'kontrol1', 'kontrol2', 'unassigned'].filter((value, idx, arr) => arr.indexOf(value) === idx).map((option) => (
+                              <option key={option} value={option}>{option}</option>
+                            ))}
+                          </select>
+                          <select
+                            className="rounded-md border border-slate-300 bg-white px-2 py-1"
+                            value={model.timepoint}
+                            onChange={(e) => updateUploadModel(model.file, { timepoint: e.target.value as Timepoint })}
+                          >
+                            <option value="before">before</option>
+                            <option value="after">after</option>
+                            <option value="unknown">unknown</option>
+                          </select>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
 
           {isUploading && (
