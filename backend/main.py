@@ -222,7 +222,10 @@ async def get_task_results(task_id: str):
 
 @app.post("/api/v1/phenotyping/analyze")
 async def analyze_phenotyping(
-    image: UploadFile = File(...),
+    images: List[UploadFile] = File(...),
+    group_name: List[str] = Form(...),
+    timepoint: List[str] = Form(...),
+    replicate_id: Optional[List[str]] = Form(None),
     pool_area_m2: float = Form(16.0),
     start_date: Optional[str] = Form(None),
     end_date: Optional[str] = Form(None),
@@ -237,24 +240,50 @@ async def analyze_phenotyping(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-        contents = await image.read()
-        nparr = np.frombuffer(contents, np.uint8)
-        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        if img is None:
-            logger.warning("Failed to decode phenotyping image")
-            raise HTTPException(status_code=400, detail="Geçersiz görüntü dosyası.")
-        
-        result = phenotyping_service.analyze(
-            img,
-            pool_area_m2=pool_area_m2,
-            start_date=parsed_start_date,
-            end_date=parsed_end_date,
-        )
+        if len(group_name) != len(images) or len(timepoint) != len(images):
+            raise HTTPException(
+                status_code=400,
+                detail="group_name ve timepoint alanları, gönderilen images adediyle aynı uzunlukta olmalıdır.",
+            )
+        if replicate_id is not None and len(replicate_id) != len(images):
+            raise HTTPException(
+                status_code=400,
+                detail="replicate_id gönderildiyse images adediyle aynı uzunlukta olmalıdır.",
+            )
+
+        results_with_meta: List[Dict[str, Any]] = []
+        for idx, image in enumerate(images):
+            contents = await image.read()
+            nparr = np.frombuffer(contents, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            if img is None:
+                logger.warning("Failed to decode phenotyping image: %s", image.filename)
+                raise HTTPException(status_code=400, detail=f"Geçersiz görüntü dosyası: {image.filename}")
+
+            result = phenotyping_service.analyze(
+                img,
+                pool_area_m2=pool_area_m2,
+                start_date=parsed_start_date,
+                end_date=parsed_end_date,
+            )
+            results_with_meta.append({
+                "file_name": image.filename,
+                "group_name": group_name[idx],
+                "timepoint": timepoint[idx],
+                "replicate_id": replicate_id[idx] if replicate_id is not None else None,
+                "result": result,
+            })
+
+        group_comparisons = phenotyping_service.compute_group_comparisons(results_with_meta)
+
         response_payload = {
             "schema_version": "1.0.0",
-            "data": result,
+            "data": {
+                "results": results_with_meta,
+                "group_comparisons": group_comparisons,
+            },
         }
-        logger.info("Phenotyping analysis completed successfully")
+        logger.info("Phenotyping analysis completed successfully for %d images", len(images))
         return response_payload
     except HTTPException:
         raise

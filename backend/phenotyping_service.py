@@ -103,6 +103,108 @@ class AzollaPhenotypingService:
             raise ValueError("Geçersiz tarih aralığı: start_date, end_date değerinden büyük olamaz.")
         return parsed_start, parsed_end
 
+
+
+    @staticmethod
+    def _extract_metric_values(result: Dict[str, Any]) -> Dict[str, float]:
+        metrics: Dict[str, float] = {}
+
+        seg = result.get("segmentasyon", {}) if isinstance(result, dict) else {}
+        renk = result.get("renk_indeksleri", {}) if isinstance(result, dict) else {}
+        bio = result.get("biyokutle_tahmini", {}) if isinstance(result, dict) else {}
+
+        if isinstance(seg.get("kaplama_orani"), (int, float)):
+            metrics["coverage"] = float(seg["kaplama_orani"])
+        if isinstance(renk.get("klorofil_indeksi"), (int, float)):
+            metrics["chlorophyll"] = float(renk["klorofil_indeksi"])
+        if isinstance(bio.get("yas_biyokutle_kg"), (int, float)):
+            metrics["biomass_wet_kg"] = float(bio["yas_biyokutle_kg"])
+        if isinstance(bio.get("kuru_biyokutle_kg"), (int, float)):
+            metrics["biomass_dry_kg"] = float(bio["kuru_biyokutle_kg"])
+
+        return metrics
+
+    @staticmethod
+    def _summarize_metric_records(metric_records: list[Dict[str, float]]) -> Dict[str, Any]:
+        if not metric_records:
+            return {"count": 0, "metrics": {}}
+
+        import statistics
+
+        keys = sorted({k for record in metric_records for k in record.keys()})
+        summary: Dict[str, Any] = {"count": len(metric_records), "metrics": {}}
+        for key in keys:
+            values = [float(record[key]) for record in metric_records if key in record]
+            if not values:
+                continue
+            summary["metrics"][key] = {
+                "mean": float(statistics.fmean(values)),
+                "median": float(statistics.median(values)),
+                "count": len(values),
+            }
+
+        return summary
+
+    def compute_group_comparisons(self, results_with_meta: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+        grouped: Dict[str, Dict[str, list[Dict[str, float]]]] = {}
+        group_warnings: Dict[str, list[str]] = {}
+
+        for item in results_with_meta:
+            group_name = str(item.get("group_name") or "unknown")
+            timepoint = str(item.get("timepoint") or "").strip().lower()
+            result = item.get("result", {})
+
+            if group_name not in grouped:
+                grouped[group_name] = {"before": [], "after": []}
+                group_warnings[group_name] = []
+
+            if timepoint not in {"before", "after"}:
+                group_warnings[group_name].append(
+                    f"Geçersiz timepoint '{timepoint or 'empty'}' verisi atlandı."
+                )
+                continue
+
+            grouped[group_name][timepoint].append(self._extract_metric_values(result))
+
+        comparisons: list[Dict[str, Any]] = []
+        for group_name in sorted(grouped.keys()):
+            before_records = grouped[group_name]["before"]
+            after_records = grouped[group_name]["after"]
+
+            before_summary = self._summarize_metric_records(before_records)
+            after_summary = self._summarize_metric_records(after_records)
+
+            change_summary: Dict[str, Any] = {"metrics": {}}
+            metrics = sorted(set(before_summary.get("metrics", {}).keys()) | set(after_summary.get("metrics", {}).keys()))
+            for metric_name in metrics:
+                before_mean = before_summary.get("metrics", {}).get(metric_name, {}).get("mean")
+                after_mean = after_summary.get("metrics", {}).get(metric_name, {}).get("mean")
+                if before_mean is None or after_mean is None:
+                    continue
+                delta = float(after_mean - before_mean)
+                pct_change = None
+                if before_mean != 0:
+                    pct_change = float((delta / before_mean) * 100.0)
+                change_summary["metrics"][metric_name] = {
+                    "delta": delta,
+                    "pct_change": pct_change,
+                }
+
+            warnings = list(group_warnings[group_name])
+            if before_summary.get("count", 0) == 0:
+                warnings.append("Bu grupta before verisi yok.")
+            if after_summary.get("count", 0) == 0:
+                warnings.append("Bu grupta after verisi yok.")
+
+            comparisons.append({
+                "group_name": group_name,
+                "before_summary": before_summary,
+                "after_summary": after_summary,
+                "change_summary": change_summary,
+                "warnings": warnings,
+            })
+
+        return comparisons
     def analyze(
         self,
         image: np.ndarray,
