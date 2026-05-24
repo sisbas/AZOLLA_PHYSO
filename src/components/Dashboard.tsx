@@ -312,6 +312,21 @@ interface CompareFrameValidationSummary {
   totalMetricCount: number;
 }
 
+interface GroupMetricComparison {
+  key: string;
+  label: string;
+  unit: string;
+  before: number | null;
+  after: number | null;
+  absoluteChange: number | null;
+  percentChange: number | null;
+}
+
+interface GroupComparisonRow {
+  group: string;
+  metrics: GroupMetricComparison[];
+}
+
 const getNumericValue = (value: unknown): number | null => {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string' && value.trim() !== '') {
@@ -319,6 +334,48 @@ const getNumericValue = (value: unknown): number | null => {
     return Number.isFinite(parsed) ? parsed : null;
   }
   return null;
+};
+
+const buildGroupComparisonMetrics = (entry: any): GroupMetricComparison[] => {
+  const metricMap = entry?.metrics ?? entry?.metric_comparisons ?? {};
+  if (!metricMap || typeof metricMap !== 'object') return [];
+
+  return Object.entries(metricMap).map(([metricKey, rawValue]: [string, any]) => {
+    const before = getNumericValue(rawValue?.before ?? rawValue?.pre ?? rawValue?.baseline ?? rawValue?.before_avg);
+    const after = getNumericValue(rawValue?.after ?? rawValue?.post ?? rawValue?.current ?? rawValue?.after_avg);
+    const absoluteChange = getNumericValue(rawValue?.absolute_change ?? rawValue?.abs_change ?? rawValue?.delta)
+      ?? (before !== null && after !== null ? after - before : null);
+    const percentChange = getNumericValue(rawValue?.percent_change ?? rawValue?.pct_change ?? rawValue?.change_percent)
+      ?? (absoluteChange !== null && before !== null && Math.abs(before) > Number.EPSILON ? (absoluteChange / Math.abs(before)) * 100 : null);
+
+    return {
+      key: metricKey,
+      label: rawValue?.label ?? metricKey,
+      unit: rawValue?.unit ?? '',
+      before,
+      after,
+      absoluteChange,
+      percentChange,
+    };
+  });
+};
+
+const parseGroupComparisons = (rawGroupComparisons: any): GroupComparisonRow[] => {
+  if (Array.isArray(rawGroupComparisons)) {
+    return rawGroupComparisons.map((entry: any, index: number) => ({
+      group: String(entry?.group ?? entry?.group_name ?? entry?.name ?? `Grup ${index + 1}`),
+      metrics: buildGroupComparisonMetrics(entry),
+    }));
+  }
+
+  if (rawGroupComparisons && typeof rawGroupComparisons === 'object') {
+    return Object.entries(rawGroupComparisons).map(([groupName, entry]: [string, any]) => ({
+      group: groupName,
+      metrics: buildGroupComparisonMetrics(entry),
+    }));
+  }
+
+  return [];
 };
 
 const validateCompareFrameMetrics = (frame: any): CompareFrameValidationSummary => {
@@ -1353,6 +1410,9 @@ export default function Dashboard({ taskId }: DashboardProps) {
   const downloadCsv = () => {
     if (!data?.timeline?.length) return;
 
+    const groupComparisons = parseGroupComparisons(data?.group_comparisons);
+    const groupComparisonKeys = Array.from(new Set(groupComparisons.flatMap((group) => group.metrics.map((metric) => metric.key))));
+
     const headers = [
       'frame',
       'timestamp',
@@ -1362,22 +1422,37 @@ export default function Dashboard({ taskId }: DashboardProps) {
       'pseudocolor_url',
       'overlay_url',
       'isolated_url',
+      ...groupComparisons.flatMap((group) => groupComparisonKeys.flatMap((key) => [
+        `group_${group.group}_${key}_before`,
+        `group_${group.group}_${key}_after`,
+        `group_${group.group}_${key}_absolute_change`,
+        `group_${group.group}_${key}_percent_change`,
+      ])),
     ];
     const escapeCsvCell = (value: unknown) => {
       if (value === null || value === undefined) return '';
       const text = String(value);
       return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
     };
-    const rows = data.timeline.map((frame: any, index: number) => [
-      `FRAME_${String(index + 1).padStart(2, '0')}`,
-      frame?.timestamp ?? frame?.parsed_timestamp ?? '',
-      frame?.status ?? '',
-      ...COMPARE_METRICS.map((metric) => getCompareMetricValue(frame, metric.key) ?? ''),
-      frame?.image_urls?.rgb ?? '',
-      frame?.image_urls?.pseudocolor ?? '',
-      frame?.image_urls?.overlay ?? '',
-      frame?.image_urls?.isolated ?? '',
-    ]);
+    const rows = data.timeline.map((frame: any, index: number) => {
+      const baseRow = [
+        `FRAME_${String(index + 1).padStart(2, '0')}`,
+        frame?.timestamp ?? frame?.parsed_timestamp ?? '',
+        frame?.status ?? '',
+        ...COMPARE_METRICS.map((metric) => getCompareMetricValue(frame, metric.key) ?? ''),
+        frame?.image_urls?.rgb ?? '',
+        frame?.image_urls?.pseudocolor ?? '',
+        frame?.image_urls?.overlay ?? '',
+        frame?.image_urls?.isolated ?? '',
+      ];
+
+      const groupRow = groupComparisons.flatMap((group) => groupComparisonKeys.flatMap((key) => {
+        const metric = group.metrics.find((item) => item.key === key);
+        return [metric?.before ?? '', metric?.after ?? '', metric?.absoluteChange ?? '', metric?.percentChange ?? ''];
+      }));
+
+      return [...baseRow, ...groupRow];
+    });
     const csv = [headers, ...rows]
       .map((row) => row.map(escapeCsvCell).join(','))
       .join('\n');
@@ -1386,6 +1461,26 @@ export default function Dashboard({ taskId }: DashboardProps) {
     const link = document.createElement('a');
     link.href = url;
     link.download = `azolla_full_batch_report_${taskId}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+  const downloadJson = () => {
+    if (!data) return;
+    const groupComparisons = parseGroupComparisons(data?.group_comparisons);
+    const payload = {
+      task_id: taskId,
+      exported_at: new Date().toISOString(),
+      timeline: data.timeline,
+      group_comparisons: groupComparisons,
+    };
+
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `azolla_full_batch_report_${taskId}.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -1592,6 +1687,7 @@ export default function Dashboard({ taskId }: DashboardProps) {
   }, {});
 
   const summaryReport = buildSummaryReport(data.timeline);
+  const groupComparisons = parseGroupComparisons(data?.group_comparisons);
 
   const pieData = Object.keys(statusCounts).map(key => ({
     name: key === 'HEALTHY' ? 'Sağlıklı' : key === 'STRESSED' ? 'Stresli' : 'Bilinmiyor',
@@ -1625,6 +1721,8 @@ export default function Dashboard({ taskId }: DashboardProps) {
     decisionContributionRows,
     handleDownload,
     downloadCsv,
+    downloadJson,
+    groupComparisons,
     metricStats,
     chartData,
     selectedChartMetricConfigs,

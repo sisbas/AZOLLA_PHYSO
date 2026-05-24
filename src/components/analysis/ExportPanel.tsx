@@ -4,7 +4,7 @@ import { analysisTypography } from './typography';
 import { analysisCardTokens } from './visualTokens';
 
 export function ExportPanel({ model }: { model: any }) {
-  const { setViewMode, handleDownload, downloadCsv } = model;
+  const { setViewMode, handleDownload, downloadCsv, downloadJson } = model;
 
   return (
     <div className={cn(analysisCardTokens.base, 'bg-slate-900 border-slate-800 text-white p-6 space-y-6 relative overflow-hidden')}>
@@ -35,9 +35,14 @@ export function ExportPanel({ model }: { model: any }) {
           ))}
         </div>
       </div>
-      <button onClick={downloadCsv} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-4 rounded-xl flex items-center justify-center gap-3 transition-all relative z-10">
-        <Layers size={14} /> Tüm batch raporunu (CSV) indir
-      </button>
+      <div className="grid grid-cols-1 gap-2">
+        <button onClick={downloadCsv} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-4 rounded-xl flex items-center justify-center gap-3 transition-all relative z-10">
+          <Layers size={14} /> Tüm batch raporunu (CSV) indir
+        </button>
+        <button onClick={downloadJson} className="w-full bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold py-4 rounded-xl flex items-center justify-center gap-3 transition-all relative z-10">
+          <Download size={14} /> Tüm batch raporunu (JSON) indir
+        </button>
+      </div>
     </div>
   );
 }
