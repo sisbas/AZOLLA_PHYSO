@@ -266,11 +266,17 @@ async def analyze_phenotyping(
                 start_date=parsed_start_date,
                 end_date=parsed_end_date,
             )
+            normalized_group_name = group_name[idx].strip()
+            normalized_timepoint = timepoint[idx].strip().lower()
+            normalized_replicate_id = (
+                replicate_id[idx].strip() if replicate_id is not None and replicate_id[idx] is not None else None
+            )
+
             results_with_meta.append({
                 "file_name": image.filename,
-                "group_name": group_name[idx],
-                "timepoint": timepoint[idx],
-                "replicate_id": replicate_id[idx] if replicate_id is not None else None,
+                "group_name": normalized_group_name,
+                "timepoint": normalized_timepoint,
+                "replicate_id": normalized_replicate_id,
                 "result": result,
             })
 
