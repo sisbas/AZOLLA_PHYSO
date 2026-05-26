@@ -313,12 +313,16 @@ async def analyze_phenotyping(
             })
 
         group_comparisons = phenotyping_service.compute_group_comparisons(results_with_meta)
+        mask_validity_distribution = phenotyping_service.compute_mask_validity_distribution(results_with_meta)
 
         response_payload = {
             "schema_version": "1.0.0",
             "data": {
                 "results": results_with_meta,
                 "group_comparisons": group_comparisons,
+                "batch_report": {
+                    "mask_validity_distribution": mask_validity_distribution,
+                },
             },
         }
         logger.info("Phenotyping analysis completed successfully for %d images", len(images))
