@@ -130,3 +130,21 @@ MIT License
 
 ## Contact
 For questions and support, please open an issue on the repository.
+
+## Runnable Mini Package (Hızlı Başlangıç)
+
+Aşağıdaki komut ile örnek veri üzerinde hızlı analiz alabilirsiniz:
+
+```bash
+cd azolla_stress_detection
+python -m src.run_mini_package --data data/excel/sample_azolla.csv --out reports/sample_run
+```
+
+Üretilen çıktılar:
+- `group_summary.csv`
+- `anova_rgr.csv`
+- `anova_total_chlorophyll.csv`
+- `gd_br_pairwise_rgr.csv`
+- `report.json`
+
+Kendi verinizi çalıştırmak için `--data` parametresine CSV dosya yolunu verin.
