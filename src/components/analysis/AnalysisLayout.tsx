@@ -20,21 +20,57 @@ function TopMetricsRow({ model }: { model: any }) {
   const frondCount = model.currentFrondCount === null ? '—' : model.currentFrondCount.toFixed(0);
   const qcLabel = model.qcSummary?.label ?? 'QC bilinmiyor';
   const riskIndex = typeof model.compositeRisk?.score === 'number' ? `${model.compositeRisk.score}/100` : '—';
+  const qcLevel = model.qcSummary?.level ?? 'unknown';
+  const riskBand = model.compositeRisk?.band ?? 'unknown';
+
+  const getStatusTone = (status?: string) => {
+    if (status === 'success') return 'text-emerald-700';
+    if (status === 'warning') return 'text-amber-700';
+    if (status === 'critical') return 'text-rose-700';
+    return 'text-slate-900';
+  };
+
+  const getChipTone = (status?: string) => {
+    if (status === 'success') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+    if (status === 'warning') return 'bg-amber-50 text-amber-700 border-amber-200';
+    if (status === 'critical') return 'bg-rose-50 text-rose-700 border-rose-200';
+    return 'bg-slate-100 text-slate-600 border-slate-200';
+  };
 
   const cards = [
-    { label: 'Stres olasılığı', value: stressProbability },
-    { label: 'Kapsama', value: coverage },
-    { label: 'Frond sayısı', value: frondCount },
-    { label: 'QC durumu', value: qcLabel },
-    { label: 'Risk Endeksi', value: riskIndex },
+    { label: 'Stres olasılığı', value: stressProbability, status: 'warning' as const },
+    { label: 'Kapsama', value: coverage, status: 'success' as const },
+    { label: 'Frond sayısı', value: frondCount, status: 'success' as const },
+    {
+      label: 'QC durumu',
+      value: qcLabel,
+      status: qcLevel === 'reliable' ? 'success' as const : qcLevel === 'warning' ? 'warning' as const : qcLevel === 'low' ? 'critical' as const : undefined,
+      chipLabel: qcLevel === 'reliable' ? 'Başarılı' : qcLevel === 'warning' ? 'Uyarı' : qcLevel === 'low' ? 'Kritik' : 'Bilinmiyor',
+    },
+    {
+      label: 'Risk Endeksi',
+      value: riskIndex,
+      status: riskBand === 'high' ? 'critical' as const : riskBand === 'medium' ? 'warning' as const : riskBand === 'low' ? 'success' as const : undefined,
+      chipLabel: riskBand === 'high' ? 'Kritik' : riskBand === 'medium' ? 'Uyarı' : riskBand === 'low' ? 'Başarılı' : 'Bilinmiyor',
+    },
   ];
 
   return (
-    <div className="grid grid-cols-2 xl:grid-cols-5 gap-3">
+    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3 md:gap-4">
       {cards.map((card) => (
-        <div key={card.label} className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-          <p className="text-xs font-semibold text-slate-500">{card.label}</p>
-          <p className="text-lg font-bold text-slate-900 tabular-nums mt-1">{card.value}</p>
+        <div
+          key={card.label}
+          className="group rounded-xl border border-slate-200 bg-white px-4 md:px-5 py-4 md:py-5 min-h-[124px] shadow-sm transition-colors transition-shadow duration-150 hover:shadow-md hover:border-slate-300 focus-within:shadow-md focus-within:border-sky-300"
+        >
+          <div className="flex items-start justify-between gap-2">
+            <p className="text-xs md:text-sm font-medium text-slate-600">{card.label}</p>
+            {card.chipLabel ? (
+              <span className={cn('px-2 py-0.5 rounded-full border text-[11px] font-bold leading-5', getChipTone(card.status))}>
+                {card.chipLabel}
+              </span>
+            ) : null}
+          </div>
+          <p className={cn('text-[28px] md:text-[32px] font-black tabular-nums mt-3 leading-none', getStatusTone(card.status))}>{card.value}</p>
         </div>
       ))}
     </div>
