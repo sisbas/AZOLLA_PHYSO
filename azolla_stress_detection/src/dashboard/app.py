@@ -16,6 +16,11 @@ import plotly.express as px
 import plotly.graph_objects as go
 from typing import Dict, Optional
 import io
+import json
+import tempfile
+import zipfile
+
+from src.run_mini_package import load_experiment_table, run_anova, compare_br_under_gd
 
 # Page config
 st.set_page_config(
@@ -156,6 +161,42 @@ def upload_section():
         )
     
     return uploaded_files, excel_file
+
+
+def run_mini_package_from_dataframe(df: pd.DataFrame) -> dict:
+    """Run mini-package analysis from an in-memory dataframe and return CSV/json outputs."""
+    outputs = {}
+
+    summary = df.groupby(["Gd_cat", "BR_cat"])[[
+        "RGR (g g⁻¹ gün⁻¹)", "Toplam Klorofil", "Karotenoid", "Mutlak Büyüme (g)"
+    ]].agg(["mean", "std", "count"])
+    outputs["group_summary.csv"] = summary.to_csv()
+
+    anova_rgr = run_anova(df, "RGR (g g⁻¹ gün⁻¹)")
+    anova_chl = run_anova(df, "Toplam Klorofil")
+    outputs["anova_rgr.csv"] = anova_rgr.to_csv(index=False)
+    outputs["anova_total_chlorophyll.csv"] = anova_chl.to_csv(index=False)
+
+    gd_cmp = compare_br_under_gd(df, "RGR (g g⁻¹ gün⁻¹)")
+    outputs["gd_br_pairwise_rgr.csv"] = gd_cmp.to_csv(index=False)
+
+    report = {
+        "n_rows": int(len(df)),
+        "groups": sorted([str(x) for x in df["Grup Kodu"].dropna().unique()]),
+        "outputs": list(outputs.keys()),
+    }
+    outputs["report.json"] = json.dumps(report, ensure_ascii=False, indent=2)
+    return outputs
+
+
+def build_zip_from_outputs(outputs: dict[str, str]) -> bytes:
+    """Bundle mini-package outputs as a zip archive for download."""
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for filename, content in outputs.items():
+            zf.writestr(filename, content)
+    zip_buffer.seek(0)
+    return zip_buffer.getvalue()
 
 
 def display_stress_gauge(stress_score: float, stress_class: str, confidence: float):
@@ -345,6 +386,37 @@ def main():
     
     # Upload section
     uploaded_files, excel_file = upload_section()
+
+    st.subheader("🧪 Mini Paket (Tek Buton)")
+    mini_csv = st.file_uploader(
+        "Mini paket için CSV yükleyin",
+        type=["csv"],
+        key="mini_csv_upload",
+        help="Deney CSV dosyanızı yükleyin ve tek butonla mini analiz çıktıları üretin."
+    )
+
+    mini_btn = st.button("➕ Mini Paketi Sisteme Ekle", use_container_width=True)
+    if mini_btn:
+        if mini_csv is None:
+            st.warning("Lütfen önce mini paket için bir CSV dosyası yükleyin.")
+        else:
+            try:
+                temp_df = pd.read_csv(mini_csv)
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp:
+                    temp_df.to_csv(tmp.name, index=False)
+                    df_mini = load_experiment_table(Path(tmp.name))
+
+                outputs = run_mini_package_from_dataframe(df_mini)
+                zip_bytes = build_zip_from_outputs(outputs)
+                st.success("Mini paket analizi tamamlandı. Çıktıları indirebilirsiniz.")
+                st.download_button(
+                    "📦 Mini Paket Çıktılarını İndir (.zip)",
+                    data=zip_bytes,
+                    file_name="azolla_mini_package_outputs.zip",
+                    mime="application/zip"
+                )
+            except Exception as e:
+                st.error(f"Mini paket çalıştırılırken hata oluştu: {e}")
     
     # Process button
     col1, col2 = st.columns([1, 4])
