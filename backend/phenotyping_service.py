@@ -67,6 +67,51 @@ class AzollaPhenotypingService:
             return ""
         return "data:image/png;base64," + base64.b64encode(enc.tobytes()).decode("utf-8")
 
+    def _resolve_manual_roi_mask(self, manual_roi: Optional[Any], image_shape: tuple[int, int, int]) -> Optional[np.ndarray]:
+        if not manual_roi:
+            return None
+
+        roi_payload = manual_roi.model_dump() if hasattr(manual_roi, "model_dump") else manual_roi
+        if not isinstance(roi_payload, dict):
+            return None
+
+        h, w = image_shape[:2]
+        mask_base64 = roi_payload.get("mask_base64")
+        if isinstance(mask_base64, str) and mask_base64.strip():
+            try:
+                encoded = mask_base64.split(",", 1)[-1]
+                decoded = base64.b64decode(encoded)
+                nparr = np.frombuffer(decoded, np.uint8)
+                decoded_mask = cv2.imdecode(nparr, cv2.IMREAD_GRAYSCALE)
+                if decoded_mask is not None:
+                    if decoded_mask.shape != (h, w):
+                        decoded_mask = cv2.resize(decoded_mask, (w, h), interpolation=cv2.INTER_NEAREST)
+                    return np.where(decoded_mask > 0, 255, 0).astype(np.uint8)
+            except Exception:
+                logger.warning("Manual ROI mask_base64 decode edilemedi, polygon fallback denenecek.")
+
+        polygon = roi_payload.get("polygon")
+        if not isinstance(polygon, list) or len(polygon) < 3:
+            return None
+
+        coordinate_space = (roi_payload.get("coordinate_space") or "pixel").lower()
+        points: list[list[int]] = []
+        for p in polygon:
+            if not isinstance(p, dict) or "x" not in p or "y" not in p:
+                continue
+            x, y = float(p["x"]), float(p["y"])
+            if coordinate_space == "normalized":
+                x *= w
+                y *= h
+            points.append([int(round(np.clip(x, 0, w - 1))), int(round(np.clip(y, 0, h - 1)))])
+
+        if len(points) < 3:
+            return None
+
+        manual_mask = np.zeros((h, w), dtype=np.uint8)
+        cv2.fillPoly(manual_mask, [np.array(points, dtype=np.int32)], 255)
+        return manual_mask
+
     @staticmethod
     def parse_date(value: str, field_name: str) -> date:
         """Parse YYYY-MM-DD date text into a date object."""
@@ -213,6 +258,7 @@ class AzollaPhenotypingService:
         pool_area_m2: float = 16.0,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
+        manual_roi: Optional[Any] = None,
     ) -> Dict[str, Any]:
         try:
             logger.info(f"Starting analysis for image with shape {image.shape}, pool_area: {pool_area_m2} m²")
@@ -222,8 +268,14 @@ class AzollaPhenotypingService:
             step3 = self._reduce_reflection(step2)
             preprocessed = self._sharpen(step3)
             rgb = cv2.cvtColor(preprocessed, cv2.COLOR_BGR2RGB)
-            mask, qc, _ = self.segmenter.process(rgb)
-            binary_mask = np.where(mask > 0, 255, 0).astype(np.uint8)
+            manual_mask = self._resolve_manual_roi_mask(manual_roi=manual_roi, image_shape=image.shape)
+            if manual_mask is not None:
+                binary_mask = manual_mask
+                mask = (binary_mask > 0).astype(np.uint8)
+                qc = type("ManualQC", (), {"coverage_pct": float(np.mean(mask > 0) * 100.0), "quality_score": 1.0, "warnings": []})()
+            else:
+                mask, qc, _ = self.segmenter.process(rgb)
+                binary_mask = np.where(mask > 0, 255, 0).astype(np.uint8)
             isolated_rgb = cv2.bitwise_and(rgb, rgb, mask=binary_mask)
             isolated_gray = cv2.cvtColor(isolated_rgb, cv2.COLOR_RGB2GRAY)
             isolated_nonzero = isolated_gray > 0
