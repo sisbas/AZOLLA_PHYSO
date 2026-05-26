@@ -15,40 +15,70 @@ export function ImageViewer({ model }: { model: any }) {
 
   return (
     <div className={cn(analysisCardTokens.base, 'lg:col-span-3 overflow-hidden flex flex-col relative')}>
-      <div className="h-[56px] border-b border-slate-100 flex items-center justify-between px-6 bg-white/50 backdrop-blur-sm z-10">
-        <div className="flex items-center gap-2">
-          <div className="flex bg-slate-100/80 p-1 rounded-xl">
+      <div className="border-b border-slate-100 bg-white/70 backdrop-blur-sm z-10">
+        <div className="px-4 sm:px-6 pt-3 pb-2 border-b border-slate-100/80">
+          <div className="flex items-center gap-2 overflow-x-auto">
             {(['rgb', 'pseudo', 'overlay'] as const).map((mode) => (
               <button
                 key={mode}
                 onClick={() => setViewMode(mode)}
                 className={cn(
-                  'px-6 py-2 text-xs font-bold rounded-lg transition-all',
-                  viewMode === mode ? 'bg-white text-slate-900 shadow-md ring-1 ring-slate-200' : 'text-slate-400 hover:text-slate-600'
+                  'px-3 sm:px-4 py-2 text-xs sm:text-sm border-b-2 transition-all whitespace-nowrap',
+                  viewMode === mode
+                    ? 'border-slate-900 text-slate-900 font-semibold'
+                    : 'border-transparent text-slate-400 font-medium hover:text-slate-600'
                 )}
               >
                 {viewModeLabels[mode]}
               </button>
             ))}
           </div>
-          <button
-            onClick={() => setViewMode('isolated')}
-            className={cn(
-              'px-5 py-2 text-xs font-bold rounded-xl transition-all border flex items-center gap-2',
-              viewMode === 'isolated'
-                ? 'bg-emerald-600 text-white border-emerald-600'
-                : 'bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50'
-            )}
-          >
-            <Sparkles size={14} />
-            Segmentasyon
-          </button>
         </div>
-        <div className="flex items-center gap-4">
-          <div className="h-4 w-px bg-slate-200" />
-          <span className="text-xs font-mono font-bold text-slate-400">
-            SCAN_ID: <span className="text-slate-900">{currentIndex + 1}</span> / {chartData.length}
-          </span>
+        <div className="px-4 sm:px-6 py-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="hidden sm:flex items-center gap-2">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Araçlar</span>
+              <button
+                onClick={() => setViewMode('isolated')}
+                className={cn(
+                  'px-4 py-2 text-xs font-semibold rounded-xl transition-all border flex items-center gap-2',
+                  viewMode === 'isolated'
+                    ? 'bg-emerald-600 text-white border-emerald-600'
+                    : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                )}
+              >
+                <Sparkles size={14} />
+                Segmentasyon
+              </button>
+            </div>
+            <div className="hidden sm:flex items-center gap-2">
+              <span className="text-[11px] font-mono font-semibold text-slate-500 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1">
+                SCAN_ID {currentIndex + 1}/{chartData.length}
+              </span>
+            </div>
+            <details className="sm:hidden w-full">
+              <summary className="cursor-pointer text-[11px] text-slate-500 font-medium">Meta veriyi göster</summary>
+              <div className="mt-2">
+                <span className="inline-flex text-[11px] font-mono font-semibold text-slate-500 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1">
+                  SCAN_ID {currentIndex + 1}/{chartData.length}
+                </span>
+              </div>
+            </details>
+          </div>
+          <div className="sm:hidden mt-3">
+            <button
+              onClick={() => setViewMode('isolated')}
+              className={cn(
+                'w-full px-4 py-2.5 text-sm font-semibold rounded-xl transition-all border flex items-center justify-center gap-2',
+                viewMode === 'isolated'
+                  ? 'bg-emerald-600 text-white border-emerald-600'
+                  : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+              )}
+            >
+              <Sparkles size={14} />
+              Segmentasyon
+            </button>
+          </div>
         </div>
       </div>
 
