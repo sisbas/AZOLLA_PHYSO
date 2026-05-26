@@ -225,6 +225,26 @@ class AzollaPhenotypingService:
             mask, qc, _ = self.segmenter.process(rgb)
             binary_mask = np.where(mask > 0, 255, 0).astype(np.uint8)
             isolated_rgb = cv2.bitwise_and(rgb, rgb, mask=binary_mask)
+            isolated_gray = cv2.cvtColor(isolated_rgb, cv2.COLOR_RGB2GRAY)
+            isolated_nonzero = isolated_gray > 0
+            mask_inside = binary_mask > 0
+            mask_outside = ~mask_inside
+
+            outside_nonzero_pixels = int(np.count_nonzero(isolated_nonzero & mask_outside))
+            outside_total_pixels = int(np.count_nonzero(mask_outside))
+            inside_nonzero_pixels = int(np.count_nonzero(isolated_nonzero & mask_inside))
+            inside_total_pixels = int(np.count_nonzero(mask_inside))
+
+            leakage_pct = (
+                float((outside_nonzero_pixels / outside_total_pixels) * 100.0)
+                if outside_total_pixels > 0
+                else 0.0
+            )
+            plant_fill_pct = (
+                float((inside_nonzero_pixels / inside_total_pixels) * 100.0)
+                if inside_total_pixels > 0
+                else 0.0
+            )
             overlay_rgb = rgb.copy()
             overlay_color = np.zeros_like(rgb)
             overlay_color[:, :, 1] = 255
@@ -257,6 +277,20 @@ class AzollaPhenotypingService:
                 "isolated_rgb_png": self._png_base64(isolated_rgb),
                 "overlay_png": self._png_base64(overlay_rgb),
             }
+            result["qc"] = {
+                "coverage_pct": float(qc.coverage_pct),
+                "quality_score": float(qc.quality_score),
+                "warnings": list(qc.warnings),
+                "leakage_pct": leakage_pct,
+                "plant_fill_pct": plant_fill_pct,
+            }
+            if leakage_pct > 2.0:
+                qc_warning = (
+                    f"ROI leakage yüksek: %{leakage_pct:.1f} "
+                    "(eşik: %2.0, mask dışı non-zero piksel oranı)"
+                )
+                result.setdefault("errors", []).append(qc_warning)
+                result["qc"]["warnings"].append(qc_warning)
             if start_date is not None and end_date is not None:
                 result["date_comparison"] = self.calculate_date_diff(start_date, end_date)
 

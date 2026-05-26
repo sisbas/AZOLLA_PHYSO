@@ -59,7 +59,8 @@
                   "biyokutle_tahmini",
                   "buyume_parametreleri",
                   "images",
-                  "timestamp"
+                  "timestamp",
+                  "qc"
                 ],
                 "properties": {
                   "segmentasyon": {
@@ -131,6 +132,37 @@
                   },
                   "timestamp": {
                     "type": "string"
+                  },
+                  "qc": {
+                    "type": "object",
+                    "required": [
+                      "coverage_pct",
+                      "quality_score",
+                      "warnings",
+                      "leakage_pct",
+                      "plant_fill_pct"
+                    ],
+                    "properties": {
+                      "coverage_pct": {
+                        "type": "number"
+                      },
+                      "quality_score": {
+                        "type": "number"
+                      },
+                      "warnings": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "leakage_pct": {
+                        "type": "number"
+                      },
+                      "plant_fill_pct": {
+                        "type": "number"
+                      }
+                    },
+                    "additionalProperties": false
                   }
                 },
                 "additionalProperties": true
