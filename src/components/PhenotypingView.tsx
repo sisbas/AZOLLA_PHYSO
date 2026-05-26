@@ -12,6 +12,7 @@ import {
   ResponsiveContainer, AreaChart, Area, BarChart, Bar, Cell,
   PieChart as RechartsPie, Pie
 } from 'recharts';
+import ManualRoiEditor, { RoiPoint } from './analysis/ManualRoiEditor';
 
 interface PhenotypingData {
   qc?: {
@@ -203,6 +204,8 @@ export default function PhenotypingView() {
   const [mode, setMode] = useState<'single' | 'batch'>('single');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [roiMode, setRoiMode] = useState<'auto' | 'manual' | 'hybrid'>('auto');
+  const [manualRoiPoints, setManualRoiPoints] = useState<RoiPoint[]>([]);
 
   const downloadReport = () => {
     if (!data) return;
@@ -247,6 +250,13 @@ export default function PhenotypingView() {
       const form = new FormData();
       form.append('image', file);
       form.append('pool_area_m2', String(parsedPoolArea));
+      if (roiMode !== 'auto' && manualRoiPoints.length >= 3) {
+        form.append('manual_roi', JSON.stringify({
+          mode: roiMode,
+          coordinate_space: 'pixel',
+          polygon: manualRoiPoints,
+        }));
+      }
       if (startDate && endDate) {
         form.append('start_date', startDate);
         form.append('end_date', endDate);
@@ -283,6 +293,33 @@ export default function PhenotypingView() {
       setLoading(false);
     }
   };
+
+  const renderRoiModeDraft = () => (
+    <div className="space-y-3">
+      <div className="flex gap-2">
+        {(['auto', 'manual', 'hybrid'] as const).map((modeKey) => (
+          <button
+            key={modeKey}
+            type="button"
+            onClick={() => setRoiMode(modeKey)}
+            className={cn(
+              'px-3 py-1.5 text-xs rounded-md border',
+              roiMode === modeKey ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white border-slate-300 text-slate-600'
+            )}
+          >
+            ROI: {modeKey}
+          </button>
+        ))}
+      </div>
+      {roiMode === 'manual' && (
+        <ManualRoiEditor
+          points={manualRoiPoints}
+          onChange={setManualRoiPoints}
+          onSave={({ polygon }) => setManualRoiPoints(polygon)}
+        />
+      )}
+    </div>
+  );
 
   if (loading) {
     return (
@@ -365,6 +402,7 @@ export default function PhenotypingView() {
               <Info size={14} className="mt-0.5 shrink-0" />
               <span>Ölçüm doğruluğu alan kalibrasyonuna bağlıdır; havuz alanını gerçek ölçüye göre girin.</span>
             </div>
+            {renderRoiModeDraft()}
             
             {mode === 'single' ? (
               <label className="block text-[10px] font-black uppercase tracking-widest text-slate-500">
