@@ -14,6 +14,13 @@ import {
 } from 'recharts';
 
 interface PhenotypingData {
+  qc?: {
+    coverage_pct?: number;
+    quality_score?: number;
+    warnings?: any[];
+    leakage_pct?: number;
+    plant_fill_pct?: number;
+  };
   segmentasyon: {
     azolla_area_pixels: number;
     azolla_area_m2: number;
@@ -400,7 +407,8 @@ export default function PhenotypingView() {
     { name: 'Korelasyon', value: data.doku_analizi.correlation },
   ];
 
-  const qualityAdvice = getQualityAdvice(data.errors);
+  const qualityWarnings = [...(data.errors ?? []), ...(data.qc?.warnings ?? [])];
+  const qualityAdvice = getQualityAdvice(qualityWarnings);
   const roiPrimaryImage = isolatedRgbPng ?? binaryMaskPng ?? overlayPng ?? preprocessedRgbPng;
   const roiPrimaryLabel = isolatedRgbPng
     ? 'ROI görünümü: Yalnızca bitki'
@@ -543,6 +551,16 @@ export default function PhenotypingView() {
               Segmentasyon Sonuçları
             </h2>
           </div>
+          {(typeof data.qc?.leakage_pct === 'number' || typeof data.qc?.plant_fill_pct === 'number') && (
+            <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] font-semibold text-slate-600">
+              {typeof data.qc?.leakage_pct === 'number' && (
+                <span className="mr-3">ROI leakage: %{data.qc.leakage_pct.toFixed(1)}</span>
+              )}
+              {typeof data.qc?.plant_fill_pct === 'number' && (
+                <span>Plant fill: %{data.qc.plant_fill_pct.toFixed(1)}</span>
+              )}
+            </div>
+          )}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <MetricCard
               title="Azolla Kaplama Alanı"
