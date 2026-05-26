@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 from fastapi import FastAPI, UploadFile, File, BackgroundTasks, HTTPException, Form
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, ValidationError
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 from uuid import uuid4
@@ -49,6 +49,21 @@ class TaskStatus(BaseModel):
     status: str
     progress: int
     result: Optional[Dict[str, Any]] = None
+
+
+class RoiPoint(BaseModel):
+    x: float = Field(..., ge=0)
+    y: float = Field(..., ge=0)
+
+
+class ManualRoiInput(BaseModel):
+    """Draft ROI contract for manual/hybrid segmentation modes."""
+    mode: str = Field(default="auto", pattern="^(auto|manual|hybrid)$")
+    image_width: Optional[int] = Field(default=None, ge=1)
+    image_height: Optional[int] = Field(default=None, ge=1)
+    polygon: Optional[List[RoiPoint]] = None
+    mask_base64: Optional[str] = None
+    coordinate_space: Optional[str] = Field(default="pixel", pattern="^(pixel|normalized)$")
 
 @app.get("/api/v1/health")
 def health():
@@ -229,6 +244,7 @@ async def analyze_phenotyping(
     pool_area_m2: float = Form(16.0),
     start_date: Optional[str] = Form(None),
     end_date: Optional[str] = Form(None),
+    manual_roi: Optional[List[str]] = Form(None),
 ):
     try:
         logger.info(f"Starting phenotyping analysis, pool_area: {pool_area_m2} m²")
@@ -250,6 +266,11 @@ async def analyze_phenotyping(
                 status_code=400,
                 detail="replicate_id gönderildiyse images adediyle aynı uzunlukta olmalıdır.",
             )
+        if manual_roi is not None and len(manual_roi) != len(images):
+            raise HTTPException(
+                status_code=400,
+                detail="manual_roi gönderildiyse images adediyle aynı uzunlukta olmalıdır.",
+            )
 
         results_with_meta: List[Dict[str, Any]] = []
         for idx, image in enumerate(images):
@@ -260,11 +281,22 @@ async def analyze_phenotyping(
                 logger.warning("Failed to decode phenotyping image: %s", image.filename)
                 raise HTTPException(status_code=400, detail=f"Geçersiz görüntü dosyası: {image.filename}")
 
+            parsed_manual_roi = None
+            if manual_roi is not None and manual_roi[idx]:
+                try:
+                    parsed_manual_roi = ManualRoiInput.model_validate_json(manual_roi[idx])
+                except ValidationError as exc:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"manual_roi[{idx}] formatı geçersiz: {exc.errors()}",
+                    ) from exc
+
             result = phenotyping_service.analyze(
                 img,
                 pool_area_m2=pool_area_m2,
                 start_date=parsed_start_date,
                 end_date=parsed_end_date,
+                manual_roi=parsed_manual_roi,
             )
             normalized_group_name = group_name[idx].strip()
             normalized_timepoint = timepoint[idx].strip().lower()

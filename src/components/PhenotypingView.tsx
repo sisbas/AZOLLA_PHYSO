@@ -12,8 +12,16 @@ import {
   ResponsiveContainer, AreaChart, Area, BarChart, Bar, Cell,
   PieChart as RechartsPie, Pie
 } from 'recharts';
+import ManualRoiEditor, { RoiPoint } from './analysis/ManualRoiEditor';
 
 interface PhenotypingData {
+  qc?: {
+    coverage_pct?: number;
+    quality_score?: number;
+    warnings?: any[];
+    leakage_pct?: number;
+    plant_fill_pct?: number;
+  };
   segmentasyon: {
     azolla_area_pixels: number;
     azolla_area_m2: number;
@@ -191,9 +199,13 @@ export default function PhenotypingView() {
   const [binaryMaskPng, setBinaryMaskPng] = useState<string | null>(null);
   const [isolatedRgbPng, setIsolatedRgbPng] = useState<string | null>(null);
   const [overlayPng, setOverlayPng] = useState<string | null>(null);
+  const [showPlantOnly, setShowPlantOnly] = useState(true);
+  const [showAdvancedViews, setShowAdvancedViews] = useState(false);
   const [mode, setMode] = useState<'single' | 'batch'>('single');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [roiMode, setRoiMode] = useState<'auto' | 'manual' | 'hybrid'>('auto');
+  const [manualRoiPoints, setManualRoiPoints] = useState<RoiPoint[]>([]);
 
   const downloadReport = () => {
     if (!data) return;
@@ -238,6 +250,13 @@ export default function PhenotypingView() {
       const form = new FormData();
       form.append('image', file);
       form.append('pool_area_m2', String(parsedPoolArea));
+      if (roiMode !== 'auto' && manualRoiPoints.length >= 3) {
+        form.append('manual_roi', JSON.stringify({
+          mode: roiMode,
+          coordinate_space: 'pixel',
+          polygon: manualRoiPoints,
+        }));
+      }
       if (startDate && endDate) {
         form.append('start_date', startDate);
         form.append('end_date', endDate);
@@ -274,6 +293,33 @@ export default function PhenotypingView() {
       setLoading(false);
     }
   };
+
+  const renderRoiModeDraft = () => (
+    <div className="space-y-3">
+      <div className="flex gap-2">
+        {(['auto', 'manual', 'hybrid'] as const).map((modeKey) => (
+          <button
+            key={modeKey}
+            type="button"
+            onClick={() => setRoiMode(modeKey)}
+            className={cn(
+              'px-3 py-1.5 text-xs rounded-md border',
+              roiMode === modeKey ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white border-slate-300 text-slate-600'
+            )}
+          >
+            ROI: {modeKey}
+          </button>
+        ))}
+      </div>
+      {roiMode === 'manual' && (
+        <ManualRoiEditor
+          points={manualRoiPoints}
+          onChange={setManualRoiPoints}
+          onSave={({ polygon }) => setManualRoiPoints(polygon)}
+        />
+      )}
+    </div>
+  );
 
   if (loading) {
     return (
@@ -356,6 +402,7 @@ export default function PhenotypingView() {
               <Info size={14} className="mt-0.5 shrink-0" />
               <span>Ölçüm doğruluğu alan kalibrasyonuna bağlıdır; havuz alanını gerçek ölçüye göre girin.</span>
             </div>
+            {renderRoiModeDraft()}
             
             {mode === 'single' ? (
               <label className="block text-[10px] font-black uppercase tracking-widest text-slate-500">
@@ -398,7 +445,14 @@ export default function PhenotypingView() {
     { name: 'Korelasyon', value: data.doku_analizi.correlation },
   ];
 
-  const qualityAdvice = getQualityAdvice(data.errors);
+  const qualityWarnings = [...(data.errors ?? []), ...(data.qc?.warnings ?? [])];
+  const qualityAdvice = getQualityAdvice(qualityWarnings);
+  const roiPrimaryImage = isolatedRgbPng ?? binaryMaskPng ?? overlayPng ?? preprocessedRgbPng;
+  const roiPrimaryLabel = isolatedRgbPng
+    ? 'ROI görünümü: Yalnızca bitki'
+    : binaryMaskPng
+      ? 'ROI görünümü: Maske fallback'
+      : 'ROI görünümü: Standart fallback';
 
   return (
     <div className="min-h-screen bg-[#f8fafc]">
@@ -469,34 +523,65 @@ export default function PhenotypingView() {
 
         {/* Segmentasyon ve Alan Metrikleri */}
         <div className="mb-8">
-          {preprocessedRgbPng && (
+          <div className="mb-3 flex items-center gap-2">
+            <button
+              onClick={() => setShowPlantOnly((prev) => !prev)}
+              className={cn(
+                'px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-colors',
+                showPlantOnly ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'
+              )}
+            >
+              {showPlantOnly ? 'ROI görünümü: Yalnızca bitki' : 'ROI görünümü: Genişletilmiş'}
+            </button>
+            {!showPlantOnly && (
+              <button
+                onClick={() => setShowAdvancedViews((prev) => !prev)}
+                className="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors"
+              >
+                {showAdvancedViews ? 'Gelişmiş Görünümleri Gizle' : 'Gelişmiş Görünümleri Göster'}
+              </button>
+            )}
+          </div>
+
+          {showPlantOnly && roiPrimaryImage && (
             <div className="mb-6">
-              <h3 className="text-xs font-black uppercase tracking-widest text-slate-600 mb-2">İşlenmiş Görsel (Preprocessed)</h3>
-              <img src={preprocessedRgbPng} alt="İşlenmiş görsel (preprocessed RGB)" className="rounded-2xl border border-slate-200 bg-white" />
+              <h3 className="text-xs font-black uppercase tracking-widest text-slate-600 mb-2">{roiPrimaryLabel}</h3>
+              <img src={roiPrimaryImage} alt="ROI görünümü" className="rounded-2xl border border-slate-200 bg-white" />
             </div>
           )}
-          {binaryMaskPng && (
-            <div className="mb-6">
-              <h3 className="text-xs font-black uppercase tracking-widest text-slate-600 mb-2">Segmentasyon maskesi</h3>
-              <img src={binaryMaskPng} alt="Segmentasyon maskesi (binary)" className="rounded-2xl border border-slate-200 bg-white" />
-              <p className="mt-2 text-xs text-slate-500">Mask = binary; Isolated = masked RGB</p>
-            </div>
-          )}
-          {(isolatedRgbPng || overlayPng) && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
-              {isolatedRgbPng && (
-                <div>
-                  <h3 className="text-xs font-black uppercase tracking-widest text-slate-600 mb-2">İzole RGB (Masked RGB)</h3>
-                  <img src={isolatedRgbPng} alt="İzole RGB (mask uygulanmış)" className="rounded-2xl border border-slate-200 bg-white" />
+
+          {!showPlantOnly && showAdvancedViews && (
+            <>
+              {preprocessedRgbPng && (
+                <div className="mb-6">
+                  <h3 className="text-xs font-black uppercase tracking-widest text-slate-600 mb-2">İşlenmiş Görsel (Preprocessed)</h3>
+                  <img src={preprocessedRgbPng} alt="İşlenmiş görsel (preprocessed RGB)" className="rounded-2xl border border-slate-200 bg-white" />
                 </div>
               )}
-              {overlayPng && (
-                <div>
-                  <h3 className="text-xs font-black uppercase tracking-widest text-slate-600 mb-2">Overlay (Yarı saydam maske)</h3>
-                  <img src={overlayPng} alt="Overlay (orijinal + yarı saydam maske)" className="rounded-2xl border border-slate-200 bg-white" />
+              {binaryMaskPng && (
+                <div className="mb-6">
+                  <h3 className="text-xs font-black uppercase tracking-widest text-slate-600 mb-2">Segmentasyon maskesi</h3>
+                  <img src={binaryMaskPng} alt="Segmentasyon maskesi (binary)" className="rounded-2xl border border-slate-200 bg-white" />
+                  <p className="mt-2 text-xs text-slate-500">Mask = binary; Isolated = masked RGB</p>
                 </div>
               )}
-            </div>
+              {(isolatedRgbPng || overlayPng) && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+                  {isolatedRgbPng && (
+                    <div>
+                      <h3 className="text-xs font-black uppercase tracking-widest text-slate-600 mb-2">İzole RGB (Masked RGB)</h3>
+                      <img src={isolatedRgbPng} alt="İzole RGB (mask uygulanmış)" className="rounded-2xl border border-slate-200 bg-white" />
+                    </div>
+                  )}
+                  {overlayPng && (
+                    <div>
+                      <h3 className="text-xs font-black uppercase tracking-widest text-slate-600 mb-2">Overlay (Yarı saydam maske)</h3>
+                      <img src={overlayPng} alt="Overlay (orijinal + yarı saydam maske)" className="rounded-2xl border border-slate-200 bg-white" />
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
           )}
           <div className="flex items-center gap-2 mb-4">
             <Layers size={16} className="text-slate-400" />
@@ -504,6 +589,16 @@ export default function PhenotypingView() {
               Segmentasyon Sonuçları
             </h2>
           </div>
+          {(typeof data.qc?.leakage_pct === 'number' || typeof data.qc?.plant_fill_pct === 'number') && (
+            <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] font-semibold text-slate-600">
+              {typeof data.qc?.leakage_pct === 'number' && (
+                <span className="mr-3">ROI leakage: %{data.qc.leakage_pct.toFixed(1)}</span>
+              )}
+              {typeof data.qc?.plant_fill_pct === 'number' && (
+                <span>Plant fill: %{data.qc.plant_fill_pct.toFixed(1)}</span>
+              )}
+            </div>
+          )}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <MetricCard
               title="Azolla Kaplama Alanı"
