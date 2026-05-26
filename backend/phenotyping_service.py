@@ -22,6 +22,10 @@ class PhenotypingConfig:
     alpha: float = 5.5
     beta: float = 20.0
     dry_matter_ratio: float = 0.08
+    qc_min_mask_area_ratio: float = 0.01
+    qc_max_mask_area_ratio: float = 0.95
+    qc_max_connected_components: int = 20
+    qc_max_edge_touch_ratio: float = 0.35
 
 
 class AzollaPhenotypingService:
@@ -35,6 +39,36 @@ class AzollaPhenotypingService:
         })
         self.segmenter = DefaultSegmenter()
         logger.info("Phenotyping service initialized")
+
+    def _compute_qc_metrics(self, mask: np.ndarray) -> Dict[str, float]:
+        mask_bool = mask > 0
+        if mask_bool.size == 0:
+            return {"mask_area_ratio": 0.0, "connected_components": 0.0, "edge_touch_ratio": 0.0}
+
+        mask_area_ratio = float(np.mean(mask_bool))
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask_bool.astype(np.uint8), connectivity=8)
+        connected_components = int(max(0, num_labels - 1))
+
+        border_labels = set(np.unique(labels[0, :])) | set(np.unique(labels[-1, :])) | set(np.unique(labels[:, 0])) | set(np.unique(labels[:, -1]))
+        border_labels.discard(0)
+        edge_pixels = int(sum(int(stats[label, cv2.CC_STAT_AREA]) for label in border_labels)) if connected_components > 0 else 0
+        edge_touch_ratio = float(edge_pixels / max(1, int(np.sum(mask_bool))))
+
+        return {
+            "mask_area_ratio": mask_area_ratio,
+            "connected_components": float(connected_components),
+            "edge_touch_ratio": edge_touch_ratio,
+        }
+
+    def _evaluate_qc(self, qc_metrics: Dict[str, float]) -> tuple[bool, list[str]]:
+        reasons: list[str] = []
+        if qc_metrics["mask_area_ratio"] < self.config.qc_min_mask_area_ratio or qc_metrics["mask_area_ratio"] > self.config.qc_max_mask_area_ratio:
+            reasons.append("mask_area_ratio_out_of_range")
+        if qc_metrics["connected_components"] > float(self.config.qc_max_connected_components):
+            reasons.append("connected_components_out_of_range")
+        if qc_metrics["edge_touch_ratio"] > self.config.qc_max_edge_touch_ratio:
+            reasons.append("edge_touch_ratio_out_of_range")
+        return len(reasons) == 0, reasons
 
     def _gamma_correction(self, image: np.ndarray) -> np.ndarray:
         inv_gamma = 1.0 / self.config.gamma
@@ -69,29 +103,17 @@ class AzollaPhenotypingService:
 
     @staticmethod
     def parse_date(value: str, field_name: str) -> date:
-        """Parse YYYY-MM-DD date text into a date object."""
         try:
             return datetime.strptime(value, "%Y-%m-%d").date()
         except ValueError as exc:
-            raise ValueError(
-                f"Geçersiz {field_name} formatı: '{value}'. Beklenen format: YYYY-MM-DD."
-            ) from exc
+            raise ValueError(f"Geçersiz {field_name} formatı: '{value}'. Beklenen format: YYYY-MM-DD.") from exc
 
     @staticmethod
     def calculate_date_diff(start_date: date, end_date: date) -> Dict[str, Any]:
-        """Calculate date-only difference (timezone-independent)."""
         days_diff = (end_date - start_date).days
-        return {
-            "days_diff": days_diff,
-            "start_date": start_date.isoformat(),
-            "end_date": end_date.isoformat(),
-        }
+        return {"days_diff": days_diff, "start_date": start_date.isoformat(), "end_date": end_date.isoformat()}
 
-    def validate_date_inputs(
-        self,
-        start_date: Optional[str],
-        end_date: Optional[str],
-    ) -> Tuple[Optional[date], Optional[date]]:
+    def validate_date_inputs(self, start_date: Optional[str], end_date: Optional[str]) -> Tuple[Optional[date], Optional[date]]:
         if (start_date and not end_date) or (end_date and not start_date):
             raise ValueError("start_date ve end_date birlikte gönderilmelidir (ikisi de opsiyonel).")
         if not start_date and not end_date:
@@ -103,12 +125,9 @@ class AzollaPhenotypingService:
             raise ValueError("Geçersiz tarih aralığı: start_date, end_date değerinden büyük olamaz.")
         return parsed_start, parsed_end
 
-
-
     @staticmethod
     def _extract_metric_values(result: Dict[str, Any]) -> Dict[str, float]:
         metrics: Dict[str, float] = {}
-
         seg = result.get("segmentasyon", {}) if isinstance(result, dict) else {}
         renk = result.get("renk_indeksleri", {}) if isinstance(result, dict) else {}
         bio = result.get("biyokutle_tahmini", {}) if isinstance(result, dict) else {}
@@ -121,7 +140,6 @@ class AzollaPhenotypingService:
             metrics["biomass_wet_kg"] = float(bio["yas_biyokutle_kg"])
         if isinstance(bio.get("kuru_biyokutle_kg"), (int, float)):
             metrics["biomass_dry_kg"] = float(bio["kuru_biyokutle_kg"])
-
         return metrics
 
     @staticmethod
@@ -130,19 +148,13 @@ class AzollaPhenotypingService:
             return {"count": 0, "metrics": {}}
 
         import statistics
-
         keys = sorted({k for record in metric_records for k in record.keys()})
         summary: Dict[str, Any] = {"count": len(metric_records), "metrics": {}}
         for key in keys:
             values = [float(record[key]) for record in metric_records if key in record]
             if not values:
                 continue
-            summary["metrics"][key] = {
-                "mean": float(statistics.fmean(values)),
-                "median": float(statistics.median(values)),
-                "count": len(values),
-            }
-
+            summary["metrics"][key] = {"mean": float(statistics.fmean(values)), "median": float(statistics.median(values)), "count": len(values)}
         return summary
 
     def compute_group_comparisons(self, results_with_meta: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
@@ -159,9 +171,7 @@ class AzollaPhenotypingService:
                 group_warnings[group_name] = []
 
             if timepoint not in {"before", "after"}:
-                group_warnings[group_name].append(
-                    f"Geçersiz timepoint '{timepoint or 'empty'}' verisi atlandı."
-                )
+                group_warnings[group_name].append(f"Geçersiz timepoint '{timepoint or 'empty'}' verisi atlandı.")
                 continue
 
             grouped[group_name][timepoint].append(self._extract_metric_values(result))
@@ -170,7 +180,6 @@ class AzollaPhenotypingService:
         for group_name in sorted(grouped.keys()):
             before_records = grouped[group_name]["before"]
             after_records = grouped[group_name]["after"]
-
             before_summary = self._summarize_metric_records(before_records)
             after_summary = self._summarize_metric_records(after_records)
 
@@ -182,13 +191,8 @@ class AzollaPhenotypingService:
                 if before_mean is None or after_mean is None:
                     continue
                 delta = float(after_mean - before_mean)
-                pct_change = None
-                if before_mean != 0:
-                    pct_change = float((delta / before_mean) * 100.0)
-                change_summary["metrics"][metric_name] = {
-                    "delta": delta,
-                    "pct_change": pct_change,
-                }
+                pct_change = float((delta / before_mean) * 100.0) if before_mean != 0 else None
+                change_summary["metrics"][metric_name] = {"delta": delta, "pct_change": pct_change}
 
             warnings = list(group_warnings[group_name])
             if before_summary.get("count", 0) == 0:
@@ -198,59 +202,57 @@ class AzollaPhenotypingService:
             if not change_summary["metrics"] and before_summary.get("count", 0) > 0 and after_summary.get("count", 0) > 0:
                 warnings.append("before/after mevcut ancak ortak metrik bulunamadığı için değişim hesaplanamadı.")
 
-            comparisons.append({
-                "group_name": group_name,
-                "before_summary": before_summary,
-                "after_summary": after_summary,
-                "change_summary": change_summary,
-                "warnings": warnings,
-            })
-
+            comparisons.append({"group_name": group_name, "before_summary": before_summary, "after_summary": after_summary, "change_summary": change_summary, "warnings": warnings})
         return comparisons
-    def analyze(
-        self,
-        image: np.ndarray,
-        pool_area_m2: float = 16.0,
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None,
-    ) -> Dict[str, Any]:
+
+    @staticmethod
+    def compute_mask_validity_distribution(results_with_meta: list[Dict[str, Any]]) -> Dict[str, float]:
+        total = len(results_with_meta)
+        if total == 0:
+            return {"valid_percent": 0.0, "invalid_percent": 0.0}
+        invalid = sum(1 for item in results_with_meta if bool(item.get("result", {}).get("qc_fail")))
+        valid = total - invalid
+        return {"valid_percent": float(valid / total * 100.0), "invalid_percent": float(invalid / total * 100.0)}
+
+    def analyze(self, image: np.ndarray, pool_area_m2: float = 16.0, start_date: Optional[date] = None, end_date: Optional[date] = None) -> Dict[str, Any]:
         try:
             logger.info(f"Starting analysis for image with shape {image.shape}, pool_area: {pool_area_m2} m²")
-
-            step1 = self._gamma_correction(image)
-            step2 = self._gray_world_white_balance(step1)
-            step3 = self._reduce_reflection(step2)
-            preprocessed = self._sharpen(step3)
-            rgb = cv2.cvtColor(preprocessed, cv2.COLOR_BGR2RGB)
+            rgb = cv2.cvtColor(self._sharpen(self._reduce_reflection(self._gray_world_white_balance(self._gamma_correction(image)))), cv2.COLOR_BGR2RGB)
             mask, qc, _ = self.segmenter.process(rgb)
             binary_mask = np.where(mask > 0, 255, 0).astype(np.uint8)
+            qc_metrics = self._compute_qc_metrics(binary_mask)
+            qc_pass, qc_fail_reasons = self._evaluate_qc(qc_metrics)
+
             isolated_rgb = cv2.bitwise_and(rgb, rgb, mask=binary_mask)
             overlay_rgb = rgb.copy()
             overlay_color = np.zeros_like(rgb)
             overlay_color[:, :, 1] = 255
-            overlay_alpha = 0.35
-            overlay_rgb[binary_mask > 0] = cv2.addWeighted(
-                rgb[binary_mask > 0],
-                1.0 - overlay_alpha,
-                overlay_color[binary_mask > 0],
-                overlay_alpha,
-                0,
-            )
+            overlay_rgb[binary_mask > 0] = cv2.addWeighted(rgb[binary_mask > 0], 0.65, overlay_color[binary_mask > 0], 0.35, 0)
 
-            # Endpoint consistency guard: same input should produce similar coverage semantics
             measured_coverage = float(np.mean(mask > 0) * 100.0)
             if abs(measured_coverage - float(qc.coverage_pct)) > 20.0:
-                logger.warning(
-                    "Segmentation coverage mismatch detected: interface=%.2f%% qc=%.2f%%",
-                    measured_coverage,
-                    float(qc.coverage_pct),
-                )
+                logger.warning("Segmentation coverage mismatch detected: interface=%.2f%% qc=%.2f%%", measured_coverage, float(qc.coverage_pct))
 
-            total_pixels = mask.size
-            self.phenotyping.pixel_to_m2 = (pool_area_m2 / total_pixels) if total_pixels else 0.0
-            metrics = self.phenotyping.process(rgb, mask)
-            result = self.phenotyping.to_dict(metrics)
+            self.phenotyping.pixel_to_m2 = (pool_area_m2 / mask.size) if mask.size else 0.0
+            if qc_pass:
+                metrics = self.phenotyping.process(rgb, mask)
+                result = self.phenotyping.to_dict(metrics)
+                result["qc_fail"] = False
+            else:
+                result = {
+                    "segmentasyon": {},
+                    "renk_indeksleri": {},
+                    "stres_analizi": {"stress_score": None},
+                    "yogunluk_dagilimi": {},
+                    "doku_analizi": {},
+                    "biyokutle_tahmini": {},
+                    "buyume_parametreleri": {},
+                    "errors": [{"step": "quality_control", "message": "Segmentation QC failed. Stress score was not produced.", "severity": "warning", "reasons": qc_fail_reasons}],
+                    "qc_fail": True,
+                }
+
             result["timestamp"] = datetime.utcnow().isoformat()
+            result["segmentation_qc"] = {**qc_metrics, "pass": qc_pass, "fail_reasons": qc_fail_reasons}
             result["images"] = {
                 "preprocessed_rgb_png": self._png_base64(rgb),
                 "binary_mask_png": self._png_base64(binary_mask),
@@ -259,10 +261,8 @@ class AzollaPhenotypingService:
             }
             if start_date is not None and end_date is not None:
                 result["date_comparison"] = self.calculate_date_diff(start_date, end_date)
-
             logger.info("Phenotyping analysis completed successfully")
             return result
-
         except Exception as e:
             logger.error(f"Phenotyping analysis failed: {str(e)}", exc_info=True)
             raise
