@@ -11,6 +11,7 @@ import { InsightsView } from './InsightsView';
 import { PhenotypingSummary } from './PhenotypingSummary';
 import { QcSummaryPanel } from './QcSummaryPanel';
 import { analysisTypography } from './typography';
+import { analysisStateTokens } from './visualTokens';
 
 function TopMetricsRow({ model }: { model: any }) {
   const stressProbability = model.decisionProbability === null ? '—' : `${Math.round(model.decisionProbability * 100)}%`;
@@ -24,17 +25,17 @@ function TopMetricsRow({ model }: { model: any }) {
   const riskBand = model.compositeRisk?.band ?? 'unknown';
 
   const getStatusTone = (status?: string) => {
-    if (status === 'success') return 'text-emerald-700';
-    if (status === 'warning') return 'text-amber-700';
-    if (status === 'critical') return 'text-rose-700';
-    return 'text-slate-900';
+    if (status === 'success') return 'text-[var(--color-success-700)]';
+    if (status === 'warning') return 'text-[var(--color-warning-700)]';
+    if (status === 'critical') return 'text-[var(--color-danger-700)]';
+    return 'text-[var(--color-text-primary)]';
   };
 
   const getChipTone = (status?: string) => {
-    if (status === 'success') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
-    if (status === 'warning') return 'bg-amber-50 text-amber-700 border-amber-200';
-    if (status === 'critical') return 'bg-rose-50 text-rose-700 border-rose-200';
-    return 'bg-slate-100 text-slate-600 border-slate-200';
+    if (status === 'success') return analysisStateTokens.success;
+    if (status === 'warning') return analysisStateTokens.warning;
+    if (status === 'critical') return analysisStateTokens.danger;
+    return 'bg-[var(--color-surface-subtle)] text-[var(--color-text-secondary)] border-[var(--color-border)]';
   };
 
   const cards = [
@@ -70,7 +71,7 @@ function TopMetricsRow({ model }: { model: any }) {
               </span>
             ) : null}
           </div>
-          <p className={cn('text-[28px] md:text-[32px] font-black tabular-nums mt-3 leading-none', getStatusTone(card.status))}>{card.value}</p>
+          <p className={cn(analysisTypography.kpiValue, 'mt-3', getStatusTone(card.status))}>{card.value}</p>
         </div>
       ))}
     </div>
