@@ -113,7 +113,17 @@ export function FrameComparisonPanel({ model }: { model: any }) {
               {compareRows.map((row: any) => (
                 <div key={row.key} className="rounded-xl bg-white border border-white p-3 shadow-sm">
                   <div className="flex items-center justify-between gap-3 mb-1">
-                    <span className="text-xs font-black text-slate-500">{row.label}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-black text-slate-500">{row.label}</span>
+                      {row.estimated ? (
+                        <span
+                          className="rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-black text-amber-700"
+                          title={row.estimateTooltip ?? 'Bu değer tahmini fallback hesaplamasıdır.'}
+                        >
+                          estimated
+                        </span>
+                      ) : null}
+                    </div>
                     <span className={cn('text-xs tabular-nums font-black', row.delta === null ? 'text-slate-400' : row.delta >= 0 ? 'text-emerald-600' : 'text-rose-600')}>
                       {formatSignedNumber(row.delta, row.digits, row.unit)}
                     </span>
