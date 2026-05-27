@@ -351,6 +351,9 @@ class AzollaPhenotypingService:
             if abs(measured_coverage - float(qc.coverage_pct)) > 20.0:
                 logger.warning("Segmentation coverage mismatch detected: interface=%.2f%% qc=%.2f%%", measured_coverage, float(qc.coverage_pct))
 
+            qc_metrics = self._compute_qc_metrics(binary_mask)
+            qc_pass, qc_fail_reasons = self._evaluate_qc(qc_metrics)
+
             self.phenotyping.pixel_to_m2 = (pool_area_m2 / mask.size) if mask.size else 0.0
             if qc_pass:
                 metrics = self.phenotyping.process(rgb, mask)
@@ -369,6 +372,15 @@ class AzollaPhenotypingService:
                     "qc_fail": True,
                 }
 
+
+            calibration = result.get("biyokutle_tahmini", {}).get("calibration", {}) if isinstance(result.get("biyokutle_tahmini"), dict) else {}
+            result["calibration_metadata"] = {
+                "dataset_id": calibration.get("dataset_id"),
+                "calibration_date": calibration.get("calibration_date"),
+                "sample_count": calibration.get("sample_count"),
+                "mae": calibration.get("mae"),
+                "rmse": calibration.get("rmse"),
+            }
             result["timestamp"] = datetime.utcnow().isoformat()
             result["segmentation_qc"] = {**qc_metrics, "pass": qc_pass, "fail_reasons": qc_fail_reasons}
             result["images"] = {

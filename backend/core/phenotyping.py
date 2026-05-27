@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from skimage.feature import graycomatrix, graycoprops
 from skimage.morphology import disk, binary_opening, binary_closing
 import logging
+import json
+from pathlib import Path
 
 @dataclass
 class PhenotypeMetrics:
@@ -79,14 +81,32 @@ class PhenotypingModule:
     def __init__(self, config: Dict[str, Any]):
         self.cfg = config.get('phenotyping', {})
         
-        # Kalibrasyon katsayıları (deneysel olarak belirlenmeli)
-        self.alpha = self.cfg.get('biomass_alpha', 5.75)  # g/m² per % coverage
-        self.beta = self.cfg.get('biomass_beta', 10.0)   # base offset g/m²
-        
-        # Kalibrasyon güven aralıkları (literatür bazlı)
-        self.alpha_ci = self.cfg.get('biomass_alpha_ci', (4.5, 7.0))
-        self.r_squared = self.cfg.get('biomass_r_squared', 0.82)
-        self.calibration_reference = self.cfg.get('calibration_reference', 'Lab calibration 2024')
+        # Kalibrasyon artefaktı (JSON) üzerinden model katsayılarını yükle.
+        self.calibration_artifact_path = self.cfg.get('biomass_calibration_artifact')
+        self.calibration_dataset_id = self.cfg.get('calibration_dataset_id')
+        self.calibration_date = self.cfg.get('calibration_date')
+        self.calibration_sample_count = self.cfg.get('calibration_sample_count')
+        self.calibration_mae = self.cfg.get('calibration_mae')
+        self.calibration_rmse = self.cfg.get('calibration_rmse')
+
+        calibration_payload = self._load_calibration_artifact(self.calibration_artifact_path)
+
+        # Kalibrasyon katsayıları
+        self.alpha = float(calibration_payload.get('alpha', self.cfg.get('biomass_alpha', 5.75)))
+        self.beta = float(calibration_payload.get('beta', self.cfg.get('biomass_beta', 10.0)))
+
+        # Kalibrasyon güven aralıkları ve metadata
+        self.alpha_ci = tuple(calibration_payload.get('alpha_ci', self.cfg.get('biomass_alpha_ci', (4.5, 7.0))))
+        self.r_squared = float(calibration_payload.get('r_squared', self.cfg.get('biomass_r_squared', 0.82)))
+        self.calibration_reference = calibration_payload.get('reference', self.cfg.get('calibration_reference', 'Lab calibration 2024'))
+
+        self.calibration_dataset_id = calibration_payload.get('dataset_id', self.calibration_dataset_id)
+        self.calibration_date = calibration_payload.get('calibration_date', self.calibration_date)
+        self.calibration_sample_count = calibration_payload.get('sample_count', self.calibration_sample_count)
+        self.calibration_mae = calibration_payload.get('mae', self.calibration_mae)
+        self.calibration_rmse = calibration_payload.get('rmse', self.calibration_rmse)
+        self.coverage_range = calibration_payload.get('coverage_range', self.cfg.get('calibration_coverage_range', [0.0, 100.0]))
+        self.chlorophyll_range = calibration_payload.get('chlorophyll_range', self.cfg.get('calibration_chlorophyll_range', [0.0, 10.0]))
         
         # Pixel to m² conversion — varsayılan değer, gerçek hesaplama phenotyping_service.py'de yapılır
         self.pixel_to_m2 = self.cfg.get('pixel_to_m2', 0.0001)  # Örnek: 1920x1080 @ 1m²
@@ -102,6 +122,40 @@ class PhenotypingModule:
             'high_min': 67
         })
         
+
+    def _load_calibration_artifact(self, artifact_path: Optional[str]) -> Dict[str, Any]:
+        if not artifact_path:
+            return {}
+        try:
+            payload = json.loads(Path(artifact_path).read_text(encoding='utf-8'))
+            if not isinstance(payload, dict):
+                logging.warning('Calibration artifact is not an object: %s', artifact_path)
+                return {}
+            return payload
+        except Exception as exc:
+            logging.warning('Calibration artifact could not be loaded (%s): %s', artifact_path, exc)
+            return {}
+
+    def _compute_confidence(self, coverage_percent: float, chlorophyll_index: float) -> Dict[str, Any]:
+        reasons: List[str] = []
+        coverage_min, coverage_max = float(self.coverage_range[0]), float(self.coverage_range[1])
+        chl_min, chl_max = float(self.chlorophyll_range[0]), float(self.chlorophyll_range[1])
+
+        if coverage_percent < coverage_min or coverage_percent > coverage_max:
+            reasons.append('coverage_outside_calibration_range')
+        if chlorophyll_index < chl_min or chlorophyll_index > chl_max:
+            reasons.append('chlorophyll_outside_calibration_range')
+
+        confidence_score = 1.0 if not reasons else 0.45
+        return {
+            'confidence_score': confidence_score,
+            'low_confidence_reason': ';'.join(reasons) if reasons else None,
+            'input_range': {
+                'coverage_percent': {'value': coverage_percent, 'min': coverage_min, 'max': coverage_max},
+                'chlorophyll_index': {'value': chlorophyll_index, 'min': chl_min, 'max': chl_max},
+            }
+        }
+
     def calculate_agi(self, r: np.ndarray, g: np.ndarray, b: np.ndarray) -> np.ndarray:
         """
         Azolla Yeşillik İndeksi (AGI)
@@ -277,20 +331,30 @@ class PhenotypingModule:
         protein_content = 25 + 10 * chl_normalized  # %25-35 aralığı
         
         # Kalibrasyon bilgisi — API response'una eklenir
+        confidence = self._compute_confidence(coverage_percent, chlorophyll_index)
+
         calibration_info = {
             'alpha': self.alpha,
             'beta': self.beta,
             'alpha_ci': list(self.alpha_ci),
             'r_squared': self.r_squared,
             'reference': self.calibration_reference,
-            'note': 'Korelasyon ≠ nedensellik. Bu skor erken uyarı indeksidir; biyokimyasal validasyon gerektirir.'
+            'note': 'Korelasyon ≠ nedensellik. Bu skor erken uyarı indeksidir; biyokimyasal validasyon gerektirir.',
+            'dataset_id': self.calibration_dataset_id,
+            'calibration_date': self.calibration_date,
+            'sample_count': self.calibration_sample_count,
+            'mae': self.calibration_mae,
+            'rmse': self.calibration_rmse
         }
         
         return {
             'fresh_biomass_g_m2': fresh_biomass,
             'dry_biomass_g_m2': dry_biomass,
             'protein_content_percent': protein_content,
-            'calibration': calibration_info
+            'calibration': calibration_info,
+            'confidence_score': confidence['confidence_score'],
+            'low_confidence_reason': confidence['low_confidence_reason'],
+            'confidence_context': confidence['input_range']
         }
     
     def _extract_previous_coverage(self, previous_results: Dict[str, Any] = None) -> Optional[float]:
@@ -472,7 +536,10 @@ class PhenotypingModule:
                 fresh_biomass_g_m2=round(biomass_estimates['fresh_biomass_g_m2'], 2),
                 dry_biomass_g_m2=round(biomass_estimates['dry_biomass_g_m2'], 2),
                 protein_content_percent=round(biomass_estimates['protein_content_percent'], 2),
-                biomass_calibration=biomass_estimates['calibration'],
+                biomass_calibration={**biomass_estimates['calibration'],
+                                    'confidence_score': biomass_estimates.get('confidence_score'),
+                                    'low_confidence_reason': biomass_estimates.get('low_confidence_reason'),
+                                    'confidence_context': biomass_estimates.get('confidence_context')},
                 
                 growth_rate_percent_day=round_optional(growth_params['growth_rate_percent_day'], 2),
                 doubling_time_days=round_optional(growth_params['doubling_time_days'], 2),
@@ -561,7 +628,9 @@ class PhenotypingModule:
                 'fresh_biomass_g_m2': metrics.fresh_biomass_g_m2,
                 'dry_biomass_g_m2': metrics.dry_biomass_g_m2,
                 'protein_content_percent': metrics.protein_content_percent,
-                'calibration': metrics.biomass_calibration
+                'calibration': metrics.biomass_calibration,
+                'confidence_score': metrics.biomass_calibration.get('confidence_score'),
+                'low_confidence_reason': metrics.biomass_calibration.get('low_confidence_reason')
             },
             'buyume_parametreleri': {
                 'growth_rate_percent_day': metrics.growth_rate_percent_day,
