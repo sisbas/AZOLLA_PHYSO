@@ -12,7 +12,7 @@ const viewModeLabels: Record<string, string> = {
 };
 
 export function ImageViewer({ model }: { model: any }) {
-  const { currentFrame, currentIndex, setCurrentIndex, data, chartData, viewMode, setViewMode } = model;
+  const { currentFrame, currentIndex, setCurrentIndex, data, chartData, viewMode, setViewMode, getCompareImageUrl } = model;
   const [overlayMode, setOverlayMode] = useState<'viewport' | 'anchored'>('viewport');
   const [detailModalOpen, setDetailModalOpen] = useState(false);
 
@@ -37,6 +37,12 @@ export function ImageViewer({ model }: { model: any }) {
   useEffect(() => {
     setDetailModalOpen(false);
   }, [currentIndex]);
+
+  const rgbUrl = getCompareImageUrl?.(currentFrame, 'rgb') ?? '';
+  const pseudoUrl = getCompareImageUrl?.(currentFrame, 'pseudo') ?? '';
+  const isolatedUrl = getCompareImageUrl?.(currentFrame, 'isolated') ?? '';
+  const activeModeUrl = getCompareImageUrl?.(currentFrame, viewMode) ?? '';
+  const activeModeLabel = viewModeLabels[viewMode] ?? 'Görüntü';
 
   return (
     <div className={cn(analysisCardTokens.base, 'lg:col-span-3 overflow-hidden flex flex-col relative')}>
@@ -111,33 +117,46 @@ export function ImageViewer({ model }: { model: any }) {
         <div className="absolute inset-0 opacity-[0.015] scientific-grid pointer-events-none z-0" />
         <div className="relative w-full h-full p-8 flex items-center justify-center z-10">
           <div className="absolute inset-4 pointer-events-none rounded-2xl border border-white/10 z-10" />
-          <img
-            src={currentFrame.image_urls.rgb}
-            alt="RGB View"
-            className={cn(
-              'absolute inset-0 m-auto max-h-full max-w-full object-contain shadow-[0_0_50px_rgba(0,0,0,0.5)] rounded transition-all duration-700 z-10',
-              (viewMode === 'pseudo' || viewMode === 'isolated') ? 'opacity-0 scale-95 pointer-events-none' : 'opacity-100 scale-100'
-            )}
-          />
-          <img
-            src={currentFrame.image_urls.pseudocolor}
-            alt="Pseudocolor Analysis"
-            className={cn(
-              'absolute inset-0 m-auto max-h-full max-w-full object-contain transition-all duration-700 z-20',
-              (viewMode === 'pseudo' || viewMode === 'overlay') ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none',
-              viewMode === 'overlay' ? 'mix-blend-screen opacity-70' : '',
-              viewMode === 'pseudo' && 'brightness-125 contrast-125 hue-rotate-[240deg] saturate-200'
-            )}
-          />
-          <img
-            src={currentFrame.image_urls.isolated}
-            alt="Isolated Biomass"
-            className={cn(
-              'absolute inset-0 m-auto max-h-full max-w-full object-contain transition-all duration-700 z-20',
-              viewMode === 'isolated' ? 'opacity-100 scale-[1.02] drop-shadow-[0_0_30px_rgba(16,185,129,0.3)]' : 'opacity-0 scale-95 pointer-events-none'
-            )}
-            style={{ filter: viewMode === 'isolated' ? 'contrast(1.4) brightness(1.1) saturate(1.5)' : 'none' }}
-          />
+          {rgbUrl ? (
+            <img
+              src={rgbUrl}
+              alt="RGB View"
+              className={cn(
+                'absolute inset-0 m-auto max-h-full max-w-full object-contain shadow-[0_0_50px_rgba(0,0,0,0.5)] rounded transition-all duration-700 z-10',
+                (viewMode === 'pseudo' || viewMode === 'isolated') ? 'opacity-0 scale-95 pointer-events-none' : 'opacity-100 scale-100'
+              )}
+            />
+          ) : null}
+          {pseudoUrl ? (
+            <img
+              src={pseudoUrl}
+              alt="Pseudocolor Analysis"
+              className={cn(
+                'absolute inset-0 m-auto max-h-full max-w-full object-contain transition-all duration-700 z-20',
+                (viewMode === 'pseudo' || viewMode === 'overlay') ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none',
+                viewMode === 'overlay' ? 'mix-blend-screen opacity-70' : '',
+                viewMode === 'pseudo' && 'brightness-125 contrast-125 hue-rotate-[240deg] saturate-200'
+              )}
+            />
+          ) : null}
+          {isolatedUrl ? (
+            <img
+              src={isolatedUrl}
+              alt="Isolated Biomass"
+              className={cn(
+                'absolute inset-0 m-auto max-h-full max-w-full object-contain transition-all duration-700 z-20',
+                viewMode === 'isolated' ? 'opacity-100 scale-[1.02] drop-shadow-[0_0_30px_rgba(16,185,129,0.3)]' : 'opacity-0 scale-95 pointer-events-none'
+              )}
+              style={{ filter: viewMode === 'isolated' ? 'contrast(1.4) brightness(1.1) saturate(1.5)' : 'none' }}
+            />
+          ) : null}
+          {!activeModeUrl ? (
+            <div className="absolute inset-0 z-40 flex items-center justify-center p-6">
+              <div className="max-w-md rounded-2xl border border-white/20 bg-slate-900/80 px-5 py-4 text-center text-sm text-white/90">
+                {activeModeLabel} görüntüsü bulunamadı. Lütfen farklı bir görüntü modunu seçin veya veri kaynağını kontrol edin.
+              </div>
+            </div>
+          ) : null}
           {viewMode !== 'isolated' && (
             <motion.div
               animate={{ top: ['0%', '100%', '0%'] }}

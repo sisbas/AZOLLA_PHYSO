@@ -683,12 +683,28 @@ const deriveCompareMetricValue = (
 
 const getImageUrlForMode = (frame: any, mode: CompareViewMode) => {
   const urls = frame?.image_urls ?? {};
+  const sources = [urls, frame ?? {}];
+  const firstUrl = (...keys: string[]) => {
+    for (const source of sources) {
+      for (const key of keys) {
+        const value = source?.[key];
+        if (typeof value === 'string' && value.trim()) return value;
+      }
+    }
+    return '';
+  };
 
-  if (mode === 'rgb') return urls.rgb ?? '';
-  if (mode === 'pseudo') return urls.pseudocolor ?? urls.rgb ?? '';
-  if (mode === 'overlay') return urls.overlay ?? urls.pseudocolor ?? urls.rgb ?? '';
+  const resolved = {
+    rgb: firstUrl('rgb', 'rgb_png', 'preprocessed_rgb_png', 'original_rgb_png', 'image_rgb'),
+    pseudo: firstUrl('pseudocolor', 'pseudo', 'pseudocolor_png', 'pseudo_png', 'physio_map_png', 'colormap_png'),
+    overlay: firstUrl('overlay', 'overlay_png', 'blend_png', 'overlayed_png'),
+    isolated: firstUrl('isolated', 'isolated_png', 'isolated_rgb_png', 'segmentation_png', 'mask_rgb_png'),
+  };
 
-  return urls.isolated ?? urls.overlay ?? urls.pseudocolor ?? urls.rgb ?? '';
+  if (mode === 'rgb') return resolved.rgb;
+  if (mode === 'pseudo') return resolved.pseudo || resolved.rgb;
+  if (mode === 'overlay') return resolved.overlay || resolved.pseudo || resolved.rgb;
+  return resolved.isolated || resolved.overlay || resolved.pseudo || resolved.rgb;
 };
 
 const getCompareImageUrl = (frame: any, mode: CompareViewMode) => getImageUrlForMode(frame, mode);
@@ -1494,10 +1510,10 @@ export default function Dashboard({ taskId }: DashboardProps) {
         frame?.timestamp ?? frame?.parsed_timestamp ?? '',
         frame?.status ?? '',
         ...COMPARE_METRICS.map((metric) => getCompareMetricValue(frame, metric.key) ?? ''),
-        frame?.image_urls?.rgb ?? '',
-        frame?.image_urls?.pseudocolor ?? '',
-        frame?.image_urls?.overlay ?? '',
-        frame?.image_urls?.isolated ?? '',
+        getImageUrlForMode(frame, 'rgb'),
+        getImageUrlForMode(frame, 'pseudo'),
+        getImageUrlForMode(frame, 'overlay'),
+        getImageUrlForMode(frame, 'isolated'),
       ];
 
       const groupRow = groupComparisons.flatMap((group) => groupComparisonKeys.flatMap((key) => {
