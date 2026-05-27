@@ -7,22 +7,40 @@
 }
 
 :root {
-  --bg: #f8fafc;
-  --panel: #ffffff;
-  --border: #e2e8f0;
-  --text-main: #0f172a;
-  --text-dim: #475569;
-  --text-sub: #64748b;
-  --accent: #0f172a;
-  --primary: #2563eb;
-  --danger: #ef4444;
-  --success: #10b981;
-  --warning: #f59e0b;
+  --color-bg: #f8fafc;
+  --color-surface: #ffffff;
+  --color-surface-subtle: #f8fafc;
+  --color-border: #cbd5e1;
+  --color-border-subtle: #e2e8f0;
+
+  --color-text-primary: #0f172a;
+  --color-text-secondary: #334155;
+  --color-text-muted: #475569;
+
+  --color-success-50: #ecfdf5;
+  --color-success-200: #a7f3d0;
+  --color-success-700: #047857;
+
+  --color-warning-50: #fffbeb;
+  --color-warning-200: #fde68a;
+  --color-warning-700: #b45309;
+
+  --color-danger-50: #fff1f2;
+  --color-danger-200: #fecdd3;
+  --color-danger-700: #be123c;
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+
+  --shadow-sm: 0 1px 2px rgb(15 23 42 / 0.06);
+  --shadow-md: 0 8px 20px rgb(15 23 42 / 0.08);
+  --shadow-lg: 0 16px 32px rgb(15 23 42 / 0.12);
 }
 
 body {
-  background-color: var(--bg);
-  color: var(--text-main);
+  background-color: var(--color-bg);
+  color: var(--color-text-primary);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
 }
@@ -34,6 +52,6 @@ body {
 }
 
 .scientific-grid {
-  background-size: 20px 20px;
-  background-image: radial-gradient(circle, #e2e8f0 1px, transparent 1px);
+  background-size: 16px 16px;
+  background-image: radial-gradient(circle, #cbd5e1 1px, transparent 1px);
 }

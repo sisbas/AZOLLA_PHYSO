@@ -1,6 +1,6 @@
 import { ReactNode } from 'react';
 import { cn } from '../../App';
-import { analysisCardTokens } from './visualTokens';
+import { analysisCardTokens, dsSpacing } from './visualTokens';
 
 interface AnalysisCardProps {
   children: ReactNode;
@@ -10,7 +10,7 @@ interface AnalysisCardProps {
 
 export function AnalysisCard({ children, className }: AnalysisCardProps) {
   return (
-    <div className={cn(analysisCardTokens.base, 'p-6', className)}>
+    <div className={cn(analysisCardTokens.base, dsSpacing.p6, className)}>
       {children}
     </div>
   );
