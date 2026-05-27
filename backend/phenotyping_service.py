@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, date
 from typing import Any, Dict, Tuple, Optional
 import logging
+import math
 
 import cv2
 import numpy as np
@@ -171,6 +172,43 @@ class AzollaPhenotypingService:
         return parsed_start, parsed_end
 
     @staticmethod
+    def _as_nullable_float(value: Any) -> Optional[float]:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        value = float(value)
+        if math.isnan(value) or math.isinf(value):
+            return None
+        return value
+
+    @classmethod
+    def build_frame_metrics_layer(cls, result: Dict[str, Any]) -> Dict[str, Any]:
+        renk = result.get("renk_indeksleri", {}) if isinstance(result, dict) else {}
+        bio = result.get("biyokutle_tahmini", {}) if isinstance(result, dict) else {}
+        raw_metrics = result.get("metrics", {}) if isinstance(result, dict) else {}
+
+        chlorophyll = cls._as_nullable_float(renk.get("chlorophyll_index"))
+        fresh_biomass = cls._as_nullable_float(bio.get("fresh_biomass_g_m2"))
+
+        rg_ratio = cls._as_nullable_float((raw_metrics or {}).get("rg_ratio"))
+        if rg_ratio is None:
+            rg_ratio = cls._as_nullable_float((renk or {}).get("rg_ratio"))
+        if rg_ratio is None:
+            mean_r = cls._as_nullable_float((raw_metrics or {}).get("mean_r"))
+            mean_g = cls._as_nullable_float((raw_metrics or {}).get("mean_g"))
+            if mean_r is not None and mean_g not in (None, 0.0):
+                rg_ratio = cls._as_nullable_float(mean_r / mean_g)
+
+        return {
+            "phenotyping": {
+                "chlorophyll_index": chlorophyll,
+                "fresh_biomass_g_m2": fresh_biomass,
+            },
+            "metrics": {
+                "rg_ratio": rg_ratio,
+            },
+        }
+
+    @staticmethod
     def _extract_metric_values(result: Dict[str, Any]) -> Dict[str, float]:
         metrics: Dict[str, float] = {}
         seg = result.get("segmentasyon", {}) if isinstance(result, dict) else {}
@@ -258,16 +296,6 @@ class AzollaPhenotypingService:
         invalid = sum(1 for item in results_with_meta if bool(item.get("result", {}).get("qc_fail")))
         valid = total - invalid
         return {"valid_percent": float(valid / total * 100.0), "invalid_percent": float(invalid / total * 100.0)}
-
-    def analyze(self, image: np.ndarray, pool_area_m2: float = 16.0, start_date: Optional[date] = None, end_date: Optional[date] = None) -> Dict[str, Any]:
-        try:
-            logger.info(f"Starting analysis for image with shape {image.shape}, pool_area: {pool_area_m2} m²")
-            rgb = cv2.cvtColor(self._sharpen(self._reduce_reflection(self._gray_world_white_balance(self._gamma_correction(image)))), cv2.COLOR_BGR2RGB)
-            mask, qc, _ = self.segmenter.process(rgb)
-            binary_mask = np.where(mask > 0, 255, 0).astype(np.uint8)
-            qc_metrics = self._compute_qc_metrics(binary_mask)
-            qc_pass, qc_fail_reasons = self._evaluate_qc(qc_metrics)
-
 
     def analyze(
         self,

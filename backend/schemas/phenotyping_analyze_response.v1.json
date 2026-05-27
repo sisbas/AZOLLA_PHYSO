@@ -27,7 +27,8 @@
               "file_name",
               "group_name",
               "timepoint",
-              "result"
+              "result",
+              "frame"
             ],
             "properties": {
               "file_name": {
@@ -163,6 +164,57 @@
                       }
                     },
                     "additionalProperties": false
+                  }
+                },
+                "additionalProperties": true
+              },
+              "frame": {
+                "type": "object",
+                "description": "Timeline/consumer-ready birleşik metrik katmanı. result içindeki ham alanlardan map edilir ve geçersiz değerlerde explicit null döner.",
+                "required": [
+                  "phenotyping",
+                  "metrics"
+                ],
+                "properties": {
+                  "phenotyping": {
+                    "type": "object",
+                    "required": [
+                      "chlorophyll_index",
+                      "fresh_biomass_g_m2"
+                    ],
+                    "properties": {
+                      "chlorophyll_index": {
+                        "type": [
+                          "number",
+                          "null"
+                        ],
+                        "description": "result.renk_indeksleri.chlorophyll_index alanının map edilmiş hali; null/NaN ise null."
+                      },
+                      "fresh_biomass_g_m2": {
+                        "type": [
+                          "number",
+                          "null"
+                        ],
+                        "description": "result.biyokutle_tahmini.fresh_biomass_g_m2 alanının map edilmiş hali; null/NaN ise null."
+                      }
+                    },
+                    "additionalProperties": true
+                  },
+                  "metrics": {
+                    "type": "object",
+                    "required": [
+                      "rg_ratio"
+                    ],
+                    "properties": {
+                      "rg_ratio": {
+                        "type": [
+                          "number",
+                          "null"
+                        ],
+                        "description": "Öncelik: result.metrics.rg_ratio veya result.renk_indeksleri.rg_ratio. Yoksa result.metrics.mean_r/mean_g ile backend türetir. Geçersiz/null/NaN durumlarında null."
+                      }
+                    },
+                    "additionalProperties": true
                   }
                 },
                 "additionalProperties": true

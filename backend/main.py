@@ -310,6 +310,7 @@ async def analyze_phenotyping(
                 "timepoint": normalized_timepoint,
                 "replicate_id": normalized_replicate_id,
                 "result": result,
+                "frame": phenotyping_service.build_frame_metrics_layer(result),
             })
 
         group_comparisons = phenotyping_service.compute_group_comparisons(results_with_meta)
