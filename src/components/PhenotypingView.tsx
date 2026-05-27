@@ -550,21 +550,30 @@ export default function PhenotypingView() {
             </div>
           )}
 
-          {!showPlantOnly && showAdvancedViews && (
-            <>
-              {preprocessedRgbPng && (
-                <div className="mb-6">
-                  <h3 className="text-xs font-black uppercase tracking-widest text-slate-600 mb-2">İşlenmiş Görsel (Preprocessed)</h3>
-                  <img src={preprocessedRgbPng} alt="İşlenmiş görsel (preprocessed RGB)" className="rounded-2xl border border-slate-200 bg-white" />
-                </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+            <div>
+              <h3 className="text-xs font-black uppercase tracking-widest text-slate-600 mb-2">İşlenmiş Görsel</h3>
+              {preprocessedRgbPng ? (
+                <img src={preprocessedRgbPng} alt="İşlenmiş görsel (preprocessed RGB)" className="rounded-2xl border border-slate-200 bg-white" />
+              ) : (
+                <p className="text-xs text-slate-500">İşlenmiş görsel henüz üretilmedi</p>
               )}
-              {binaryMaskPng && (
-                <div className="mb-6">
-                  <h3 className="text-xs font-black uppercase tracking-widest text-slate-600 mb-2">Segmentasyon maskesi</h3>
+            </div>
+            <div>
+              <h3 className="text-xs font-black uppercase tracking-widest text-slate-600 mb-2">Segmentasyon</h3>
+              {binaryMaskPng ? (
+                <>
                   <img src={binaryMaskPng} alt="Segmentasyon maskesi (binary)" className="rounded-2xl border border-slate-200 bg-white" />
                   <p className="mt-2 text-xs text-slate-500">Mask = binary; Isolated = masked RGB</p>
-                </div>
+                </>
+              ) : (
+                <p className="text-xs text-slate-500">Segmentasyon görseli henüz üretilmedi</p>
               )}
+            </div>
+          </div>
+
+          {!showPlantOnly && showAdvancedViews && (
+            <>
               {(isolatedRgbPng || overlayPng) && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
                   {isolatedRgbPng && (
