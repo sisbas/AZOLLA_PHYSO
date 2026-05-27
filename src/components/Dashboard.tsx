@@ -618,13 +618,67 @@ const formatStressMetricValue = (value: number | null, config: StressMetricConfi
 };
 
 const getCompareMetricValue = (frame: any, key: CompareMetricKey): number | null => {
-  if (!frame) return null;
+  const derived = deriveCompareMetricValue(frame, key);
+  return derived?.value ?? null;
+};
 
-  if (key === 'chlorophyll_index' || key === 'fresh_biomass_g_m2') {
-    return getPhenotypingValue(frame.phenotyping, key as PhenotypingMetricKey);
+const clampValue = (value: number, min: number, max: number) => Math.max(min, Math.min(value, max));
+
+const deriveCompareMetricValue = (
+  frame: any,
+  key: CompareMetricKey
+): { value: number | null; estimated?: boolean; tooltip?: string } => {
+  if (!frame) return { value: null };
+  const metrics = frame.metrics ?? {};
+
+  if (key === 'rg_ratio') {
+    const rgDirect = getNumericValue(metrics.rg_ratio);
+    if (rgDirect !== null) return { value: clampValue(rgDirect, 0, 10) };
+
+    const meanR = getNumericValue(metrics.mean_r);
+    const meanG = getNumericValue(metrics.mean_g);
+    if (meanR !== null && meanG !== null && Number.isFinite(meanR) && Number.isFinite(meanG) && meanG > 0) {
+      return { value: clampValue(meanR / meanG, 0, 10), estimated: true, tooltip: 'R/G oranı mean_r / mean_g ile tahmin edildi.' };
+    }
+    return { value: null };
   }
 
-  return getNumericValue(frame.metrics?.[key]);
+  if (key === 'chlorophyll_index') {
+    const chlorophyll = getPhenotypingValue(frame.phenotyping, 'chlorophyll_index');
+    if (chlorophyll !== null) return { value: clampValue(chlorophyll, 0, 10) };
+
+    const meanR = getNumericValue(metrics.mean_r);
+    const meanG = getNumericValue(metrics.mean_g);
+    const meanB = getNumericValue(metrics.mean_b);
+    if (meanR !== null && meanG !== null && meanB !== null) {
+      const COLOR_BALANCE_EPSILON = 1e-6;
+      // Basit normalize indeks: (G-R)/(G+R+B); sonuç 0-10 klorofil ölçeğine map edilir.
+      const normalizedColorIndex = (meanG - meanR) / (meanG + meanR + meanB + COLOR_BALANCE_EPSILON);
+      const mappedChlorophyll = clampValue((normalizedColorIndex + 1) * 5, 0, 10);
+      return { value: mappedChlorophyll, estimated: true, tooltip: 'Klorofil değeri RGB normalize indeksten tahmin edildi.' };
+    }
+    return { value: null };
+  }
+
+  if (key === 'fresh_biomass_g_m2') {
+    const biomass = getPhenotypingValue(frame.phenotyping, 'fresh_biomass_g_m2');
+    if (biomass !== null) return { value: clampValue(biomass, 0, 4000) };
+
+    const coveragePercent = getNumericValue(metrics.coverage_pct) ?? getPhenotypingValue(frame.phenotyping, 'coverage_percent');
+    if (coveragePercent === null) return { value: null };
+
+    const frondCount = getNumericValue(metrics.frond_count);
+    const meanSizePx = getNumericValue(metrics.mean_size_px);
+    const coverageFactor = clampValue(coveragePercent, 0, 100) / 100;
+    const structureSignal = frondCount !== null && meanSizePx !== null
+      ? clampValue((frondCount * meanSizePx) / 6000, 0.5, 2.0)
+      : 1;
+    const estimatedBiomass = clampValue(coverageFactor * 1400 * structureSignal, 0, 4000);
+    return { value: estimatedBiomass, estimated: true, tooltip: 'Taze biyokütle coverage/frond/mean_size ile yaklaşık tahmin edildi.' };
+  }
+
+  const rawValue = getNumericValue(metrics[key]);
+  return { value: rawValue };
 };
 
 const getImageUrlForMode = (frame: any, mode: CompareViewMode) => {
@@ -1584,11 +1638,15 @@ export default function Dashboard({ taskId }: DashboardProps) {
   const compareTimeDeltaDays = getFramePairDeltaDays(compareStartFrame, compareEndFrame, data.timeline, compareStartIndex, compareEndIndex);
   const compareTimeDeltaLabel = formatTimeDeltaLabel(compareTimeDeltaDays);
   const compareRows = COMPARE_METRICS.map((metric) => {
-    const startValue = getCompareMetricValue(compareStartFrame, metric.key);
-    const endValue = getCompareMetricValue(compareEndFrame, metric.key);
+    const startDerived = deriveCompareMetricValue(compareStartFrame, metric.key);
+    const endDerived = deriveCompareMetricValue(compareEndFrame, metric.key);
+    const startValue = startDerived.value;
+    const endValue = endDerived.value;
     const hasData = startValue !== null && endValue !== null;
     const delta = hasData ? endValue - startValue : null;
     const percentChange = hasData && Math.abs(startValue) > Number.EPSILON ? (delta / Math.abs(startValue)) * 100 : null;
+    const estimated = Boolean(startDerived.estimated || endDerived.estimated);
+    const estimateTooltip = [startDerived.tooltip, endDerived.tooltip].filter(Boolean).join(' ');
 
     return {
       ...metric,
@@ -1597,6 +1655,8 @@ export default function Dashboard({ taskId }: DashboardProps) {
       hasData,
       delta,
       percentChange,
+      estimated,
+      estimateTooltip: estimateTooltip || null,
     };
   });
   const compareStartValidation = validateCompareFrameMetrics(compareStartFrame);
