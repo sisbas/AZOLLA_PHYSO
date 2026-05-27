@@ -107,6 +107,7 @@ const timestampForFile = (file: File) => {
 };
 
 export default function UploadPanel({ onComplete }: UploadPanelProps) {
+  type SegmentationActionState = 'idle' | 'loading' | 'success' | 'error';
   const [firstDateFiles, setFirstDateFiles] = useState<File[]>([]);
   const [secondDateFiles, setSecondDateFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
@@ -114,6 +115,10 @@ export default function UploadPanel({ onComplete }: UploadPanelProps) {
   const [pipelineStage, setPipelineStage] = useState<string>('queued');
   const [currentFile, setCurrentFile] = useState<string>('');
   const [error, setError] = useState<{ message: string; remediation?: string } | null>(null);
+  const [actionState, setActionState] = useState<SegmentationActionState>('idle');
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
   const [manualMetaOverrides, setManualMetaOverrides] = useState<Record<string, { groupName: string; timepoint: Timepoint }>>({});
 
   const getFileKey = (file: File) => `${file.name}-${file.size}-${file.lastModified}`;
@@ -171,7 +176,9 @@ export default function UploadPanel({ onComplete }: UploadPanelProps) {
   const uploadFiles = async () => {
     if (firstDateFiles.length === 0 || secondDateFiles.length === 0) return;
     setIsUploading(true);
+    setActionState('loading');
     setError(null);
+    setToastMessage(null);
     
     // Warm up connection to ensure session cookies are set
     try {
@@ -253,6 +260,9 @@ export default function UploadPanel({ onComplete }: UploadPanelProps) {
             clearInterval(poll);
             onComplete(data.task_id);
             setIsUploading(false);
+            setActionState('success');
+            setLastUpdatedAt(new Date().toISOString());
+            setToastMessage('Segmentasyon işlemi başarıyla tamamlandı.');
           } else if (statusData.status === 'failed') {
             clearInterval(poll);
             setError({
@@ -260,6 +270,7 @@ export default function UploadPanel({ onComplete }: UploadPanelProps) {
               remediation: 'Verify image contrast and sample density in the uploaded series.'
             });
             setIsUploading(false);
+            setActionState('error');
           }
         } catch (pollErr: any) {
           clearInterval(poll);
@@ -268,6 +279,7 @@ export default function UploadPanel({ onComplete }: UploadPanelProps) {
             remediation: 'The server may be overloaded. Try a smaller batch of images.'
           });
           setIsUploading(false);
+          setActionState('error');
         }
       }, 1000);
 
@@ -278,7 +290,13 @@ export default function UploadPanel({ onComplete }: UploadPanelProps) {
         remediation: 'Check your connection or ensure files are valid TIFF/PNG formats.'
       });
       setIsUploading(false);
+      setActionState('error');
     }
+  };
+
+  const handleRetry = () => {
+    setRetryCount((prev) => prev + 1);
+    uploadFiles();
   };
 
   return (
@@ -368,15 +386,47 @@ export default function UploadPanel({ onComplete }: UploadPanelProps) {
             ) : (
               <button 
                 onClick={uploadFiles}
-                className="group relative bg-[#10b981] text-white px-8 py-3 rounded-xl text-[11px] font-bold uppercase tracking-widest hover:bg-emerald-600 transition-all shadow-xl shadow-emerald-200 overflow-hidden"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    uploadFiles();
+                  }
+                }}
+                disabled={isUploading}
+                aria-label="Segmentasyon karşılaştırmasını başlat"
+                className={cn(
+                  'group relative bg-[#10b981] text-white px-8 py-3 rounded-xl text-[11px] font-bold uppercase tracking-widest transition-all shadow-xl shadow-emerald-200 overflow-hidden focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-emerald-300',
+                  isUploading ? 'cursor-not-allowed opacity-70' : 'hover:bg-emerald-600'
+                )}
               >
                 <span className="relative z-10 flex items-center gap-3">
-                  Tarihsel Doku Karşılaştırmasını Başlat <CheckCircle2 size={16} />
+                  {actionState === 'loading' ? (
+                    <>
+                      Segmentasyon Çalışıyor <Loader2 size={16} className="animate-spin" />
+                    </>
+                  ) : actionState === 'success' ? (
+                    <>
+                      Segmentasyon Tamamlandı <CheckCircle2 size={16} />
+                    </>
+                  ) : actionState === 'error' ? (
+                    <>
+                      Segmentasyon Hatası <AlertCircle size={16} />
+                    </>
+                  ) : (
+                    <>
+                      Tarihsel Doku Karşılaştırmasını Başlat <CheckCircle2 size={16} />
+                    </>
+                  )}
                 </span>
                 <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform" />
               </button>
             )}
           </div>
+          {lastUpdatedAt && (
+            <p className="text-[11px] text-emerald-700 font-semibold">
+              Son güncelleme: {new Date(lastUpdatedAt).toLocaleString('tr-TR')}
+            </p>
+          )}
           
           <div className="space-y-2 max-h-56 overflow-y-auto pr-3 scrollbar-thin scrollbar-thumb-slate-200">
             {uploadModels.map(({ file, groupName, timepoint, parsedMeta }, i) => {
@@ -487,9 +537,26 @@ export default function UploadPanel({ onComplete }: UploadPanelProps) {
                   className="h-full bg-[#10b981] shadow-[0_0_10px_rgba(16,185,129,0.3)] transition-all duration-300" 
                 />
                </div>
+               {progress < 10 && (
+                <div className="grid grid-cols-3 gap-2 animate-pulse pt-2" aria-label="İşlem hazırlanıyor, içerik yükleniyor">
+                  <div className="h-3 rounded bg-slate-200" />
+                  <div className="h-3 rounded bg-slate-200" />
+                  <div className="h-3 rounded bg-slate-200" />
+                </div>
+               )}
             </div>
           )}
         </motion.div>
+      )}
+
+      {toastMessage && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed right-6 top-6 z-50 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-bold text-emerald-800 shadow-lg"
+        >
+          {toastMessage}
+        </div>
       )}
 
       {error && (
@@ -504,6 +571,20 @@ export default function UploadPanel({ onComplete }: UploadPanelProps) {
           <div className="flex flex-col gap-1">
             <p className="text-sm font-black uppercase tracking-tight">{error.message}</p>
             <p className="text-xs opacity-70 leading-relaxed italic">{error.remediation}</p>
+            <button
+              type="button"
+              onClick={handleRetry}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  handleRetry();
+                }
+              }}
+              aria-label="Segmentasyon işlemini tekrar dene"
+              className="mt-2 w-fit rounded-lg border border-rose-300 bg-white/80 px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-rose-700 hover:bg-white focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-rose-200"
+            >
+              Tekrar dene {retryCount > 0 ? `(${retryCount})` : ''}
+            </button>
           </div>
         </motion.div>
       )}
