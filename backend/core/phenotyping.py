@@ -121,6 +121,27 @@ class PhenotypingModule:
             'medium_max': 66,
             'high_min': 67
         })
+        # Stres analizi eşikleri ve ağırlıkları (varsayılanlar):
+        # - brown_hue_range: HSV ton aralığı [0-179] kahverengi/kızıl yaprak tespiti
+        # - brown_min_saturation/value: düşük satürasyonlu gölgeleri elemek için alt sınır
+        # - yellow_hue_range: HSV ton aralığı [0-179] sararma tespiti
+        # - yellow_min_saturation/value: zayıf/yetersiz renkli pikselleri dışlama eşiği
+        # - lab_bright_percentile: aydınlatma normalizasyonu için LAB-L yüzdelik
+        # - iqr_penalty_scale: maskeli bölgede IQR genişliği bazlı robust ceza
+        # - browning_weight/yellowing_weight/distribution_weight: stres skoru bileşen ağırlıkları
+        self.stress_thresholds = self.cfg.get('stress_thresholds', {
+            'brown_hue_range': [5, 30],
+            'brown_min_saturation': 45,
+            'brown_min_value': 35,
+            'yellow_hue_range': [18, 45],
+            'yellow_min_saturation': 30,
+            'yellow_min_value': 40,
+            'lab_bright_percentile': 60,
+            'iqr_penalty_scale': 0.30,
+            'browning_weight': 0.5,
+            'yellowing_weight': 0.3,
+            'distribution_weight': 0.2
+        })
         
 
     def _load_calibration_artifact(self, artifact_path: Optional[str]) -> Dict[str, Any]:
@@ -184,36 +205,70 @@ class PhenotypingModule:
         chl = g / (r + 0.01)
         return np.clip(chl, 0, 10)
     
-    def calculate_stress_indices(self, r: np.ndarray, g: np.ndarray, b: np.ndarray, 
-                                  mask: np.ndarray) -> Tuple[float, float]:
+    def calculate_stress_indices(self, r: np.ndarray, g: np.ndarray, b: np.ndarray,
+                                  mask: np.ndarray) -> Tuple[float, float, float]:
         """
         Stres Belirleme İndeksleri
         
         Returns:
-            browning_percent: Kahverengileşme oranı (R>B>G piksel yüzdesi)
-            yellowing_percent: Sararma indeksi (G<R ve G<B piksel yüzdesi)
+            browning_percent: Kahverengileşme oranı (HSV/LAB normalize piksel yüzdesi)
+            yellowing_percent: Sararma indeksi (HSV/LAB normalize piksel yüzdesi)
+            robust_distribution_score: Maskeli piksel dağılımından percentile/IQR tabanlı ceza
         """
         if not np.any(mask):
-            return 0.0, 0.0
+            return 0.0, 0.0, 0.0
         
         # Maskeli bölge içindeki pikseller
         r_masked = r[mask]
         g_masked = g[mask]
-        b_masked = b[mask]
         
         total_pixels = len(r_masked)
         if total_pixels == 0:
-            return 0.0, 0.0
-        
-        # Kahverengileşme tespiti (R > B > G)
-        brown_condition = (r_masked > b_masked) & (b_masked > g_masked)
+            return 0.0, 0.0, 0.0
+
+        # HSV/LAB üzerinden aydınlatma normalize edilmiş stres tespiti
+        rgb_img = np.stack((r, g, b), axis=-1)
+        rgb_u8 = np.clip(rgb_img * 255.0, 0, 255).astype(np.uint8)
+        hsv = cv2.cvtColor(rgb_u8, cv2.COLOR_RGB2HSV)
+        lab = cv2.cvtColor(rgb_u8, cv2.COLOR_RGB2LAB)
+
+        h = hsv[:, :, 0][mask]
+        s = hsv[:, :, 1][mask]
+        v = hsv[:, :, 2][mask]
+        l = lab[:, :, 0][mask].astype(np.float32) / 255.0
+
+        pctl = float(np.percentile(l, self.stress_thresholds['lab_bright_percentile']))
+        adaptive_v_floor = self.stress_thresholds['brown_min_value'] * pctl
+
+        brown_h0, brown_h1 = self.stress_thresholds['brown_hue_range']
+        yellow_h0, yellow_h1 = self.stress_thresholds['yellow_hue_range']
+
+        # Kahverengileşme tespiti
+        brown_condition = (
+            (h >= brown_h0) & (h <= brown_h1) &
+            (s >= self.stress_thresholds['brown_min_saturation']) &
+            (v >= adaptive_v_floor)
+        )
         browning_percent = (np.sum(brown_condition) / total_pixels) * 100
-        
-        # Sararma tespiti (G < R ve G < B)
-        yellow_condition = (g_masked < r_masked) & (g_masked < b_masked)
+
+        # Sararma tespiti
+        yellow_condition = (
+            (h >= yellow_h0) & (h <= yellow_h1) &
+            (s >= self.stress_thresholds['yellow_min_saturation']) &
+            (v >= self.stress_thresholds['yellow_min_value'] * pctl)
+        )
         yellowing_percent = (np.sum(yellow_condition) / total_pixels) * 100
-        
-        return browning_percent, yellowing_percent
+
+        # Robust istatistik: maskeli bölgede kanal dağılımı (IQR / median)
+        rg_delta = r_masked - g_masked
+        q25 = np.percentile(rg_delta, 25)
+        q50 = np.percentile(rg_delta, 50)
+        q75 = np.percentile(rg_delta, 75)
+        iqr = max(q75 - q25, 1e-6)
+        normalized_iqr = iqr / (abs(q50) + 1e-3)
+        robust_distribution_score = float(np.clip(normalized_iqr * self.stress_thresholds['iqr_penalty_scale'] * 100, 0, 100))
+
+        return browning_percent, yellowing_percent, robust_distribution_score
     
     def calculate_density_map(self, mask: np.ndarray, window_size: int = 64) -> Dict[str, float]:
         """
@@ -486,8 +541,12 @@ class PhenotypingModule:
             chlorophyll_index = float(np.mean(chl[mask_bool])) if np.any(mask_bool) else 0.0
             
             # 4. Stres indeksleri
-            browning_pct, yellowing_pct = self.calculate_stress_indices(r, g, b, mask_bool)
-            stress_score = (browning_pct * 0.6 + yellowing_pct * 0.4)  # Ağırlıklı ortalama
+            browning_pct, yellowing_pct, robust_dist_score = self.calculate_stress_indices(r, g, b, mask_bool)
+            stress_score = (
+                browning_pct * self.stress_thresholds['browning_weight'] +
+                yellowing_pct * self.stress_thresholds['yellowing_weight'] +
+                robust_dist_score * self.stress_thresholds['distribution_weight']
+            )
             
             # 5. Yoğunluk haritası
             density_dist = self.calculate_density_map(mask_bool)
