@@ -1,4 +1,3 @@
-# .github/workflows/deploy-hf-spaces.yml
 name: Deploy to Hugging Face Spaces
 
 on:
@@ -8,175 +7,104 @@ on:
       - master
   workflow_dispatch:
 
-env:
-  PYTHON_VERSION: '3.11'
-  NODE_VERSION: '20'
-  HF_SPACE_ID: ${{ secrets.HF_SPACE_ID }}
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
-
+    
     steps:
-      # 1️⃣ Repository checkout with LFS
       - name: Checkout repository
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
-          lfs: true
 
-      # 2️⃣ Verify LFS tracking configuration
-      - name: Verify LFS tracking rules
+      - name: Initialize Git LFS in source repository
         run: |
-          if [ ! -f .gitattributes ]; then
-            echo "ERROR: .gitattributes file not found"
-            exit 1
-          fi
-          if ! grep -Eq 'filter=lfs' .gitattributes; then
-            echo "ERROR: No LFS filters found in .gitattributes"
-            exit 1
-          fi
-          echo "✅ LFS tracking rules verified"
-
-      # 3️⃣ Download all LFS objects
-      - name: Fetch LFS objects
-        run: |
+          git lfs install
           git lfs fetch --all
           git lfs checkout
-          echo "✅ LFS objects fetched"
 
-      # 4️⃣ Validate critical LFS files exist as actual files (not pointers)
-      - name: Validate LFS files are not pointers
+      - name: Verify LFS tracking rules
         run: |
-          CRITICAL_FILES=(
-            "backend/tests/fixtures/regression_frame.png"
-          )
-          for file in "${CRITICAL_FILES[@]}"; do
-            if [ -f "$file" ]; then
-              if file "$file" | grep -q "ASCII text"; then
-                if head -5 "$file" | grep -q "version https://git-lfs.github.com"; then
-                  echo "❌ ERROR: $file is still an LFS pointer!"
-                  exit 1
-                fi
-              fi
-              echo "✅ $file is a valid binary file"
-            else
-              echo "⚠️  Warning: $file not found (optional)"
-            fi
-          done
+          if ! grep -Eq '^(\*\.png|backend/tests/fixtures/regression_frame\.png)\s+filter=lfs' .gitattributes; then
+            echo "ERROR: .gitattributes does not include LFS tracking for regression_frame.png (or *.png)."
+            exit 1
+          fi
 
-      # 5️⃣ Set up Node.js and build frontend
       - name: Set up Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version: '20'
           cache: 'npm'
-          cache-dependency-path: '**/package-lock.json'
 
-      - name: Install frontend dependencies
+      - name: Install dependencies and build frontend
         run: |
-          if [ -f package.json ]; then
-            npm ci
-          fi
+          npm ci
+          npm run build
 
-      - name: Build frontend
+      - name: Set up Python (using system Python to avoid Node.js 20 deprecation)
         run: |
-          if [ -f package.json ] && npm run build --if-present; then
-            echo "✅ Frontend built successfully"
-          else
-            echo "⚠️  No build script found or build skipped"
-          fi
+          # Use system Python instead of setup-python action to avoid Node.js 20 warning
+          python3 --version
+          pip3 install --upgrade pip
 
-      # 6️⃣ Set up Python and install backend dependencies
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
-          cache-dependency-path: '**/requirements*.txt'
-
-      - name: Install backend dependencies
+      - name: Install Python dependencies
         run: |
-          if [ -f backend/requirements.txt ]; then
-            pip install --upgrade pip
-            pip install -r backend/requirements.txt
-            echo "✅ Backend dependencies installed"
-          else
-            echo "⚠️  backend/requirements.txt not found"
-          fi
+          pip3 install -r backend/requirements.txt
 
-      # 7️⃣ Deploy to Hugging Face Spaces
-      - name: Deploy to Hugging Face Spaces
+      - name: Deploy to Hugging Face Spaces via Git
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE_ID: ${{ secrets.HF_SPACE_ID }}
         run: |
-          # Configure git
+          # Extract username and space name from space_id
+          SPACE_NAME=$(echo $HF_SPACE_ID | cut -d'/' -f2)
+          
+          # Configure git credentials to avoid password prompt
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git config --global user.name "github-actions[bot]"
+          git config --global credential.helper store
+          echo "https://oauth2:$HF_TOKEN@huggingface.co" > ~/.git-credentials
           
-          # Clone target Space with LFS
-          rm -rf hf_space_deploy
-          git clone "https://oauth2:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE_ID}" hf_space_deploy
-          cd hf_space_deploy
+          # Clone the Hugging Face Space
+          rm -rf hf_space
+          git clone https://huggingface.co/spaces/$HF_SPACE_ID hf_space
+
+          # Initialize LFS in target clone
+          cd hf_space
           git lfs install
-          git lfs fetch --all || true
+          git lfs fetch --all || git lfs fetch origin main
           git lfs checkout
           cd ..
           
-          # Sync files (exclude unnecessary paths)
+          # Copy files to the Space (excluding .git folder)
           rsync -av --delete \
-            --exclude='.git/' \
-            --exclude='hf_space_deploy/' \
-            --exclude='.github/' \
-            --exclude='node_modules/' \
-            --exclude='dist/' \
+            --exclude='.git' \
+            --exclude='hf_space' \
+            --exclude='.github' \
+            --exclude='node_modules' \
+            --exclude='dist' \
             --exclude='*.log' \
-            --exclude='.env*' \
-            --exclude='__pycache__/' \
-            --exclude='*.pyc' \
-            ./ hf_space_deploy/
-          
-          # Final validation before push
-          cd hf_space_deploy
-          echo "🔍 Validating deployment tree..."
-          
-          # Check LFS files status
-          if git lfs ls-files | grep -q .; then
-            LFS_MISSING=$(git lfs status 2>/dev/null | grep -iE 'missing|not in cache' || true)
-            if [ -n "$LFS_MISSING" ]; then
-              echo "❌ ERROR: Missing LFS objects detected:"
-              echo "$LFS_MISSING"
-              exit 1
-            fi
-            echo "✅ All LFS objects present"
-          fi
+            ./ hf_space/
           
           # Commit and push
-          git add -A
-          if ! git diff --cached --quiet; then
-            git commit -m "🤖 Auto-deploy from GitHub Actions @ ${GITHUB_SHA:0:7}
-            
-            Triggered by: ${GITHUB_ACTOR}
-            Commit: ${GITHUB_SHA}
-            Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-            
-            echo "🚀 Pushing to Hugging Face Spaces..."
-            git push origin main
-            echo "✅ Deployment successful!"
-          else
-            echo "ℹ️  No changes to deploy"
+          cd hf_space
+          git add .
+
+          # Guard checks: ensure regression fixture is LFS-tracked and LFS objects are present
+          LFS_FILES=$(git lfs ls-files || true)
+          echo "$LFS_FILES"
+          if ! echo "$LFS_FILES" | grep -q 'backend/tests/fixtures/regression_frame\.png'; then
+            echo "ERROR: backend/tests/fixtures/regression_frame.png is not LFS-tracked in deployment tree."
+            echo "Ensure .gitattributes and file staging are correct before push."
+            exit 1
           fi
 
-      # 8️⃣ Optional: Post-deployment notification
-      - name: Deployment summary
-        if: always()
-        run: |
-          echo "### 📦 Deployment Summary" >> $GITHUB_STEP_SUMMARY
-          echo "- **Space ID**: ${HF_SPACE_ID}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Commit**: ${GITHUB_SHA:0:7}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Actor**: ${GITHUB_ACTOR}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Run URL**: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >> $GITHUB_STEP_SUMMARY
+          LFS_STATUS=$(git lfs status || true)
+          echo "$LFS_STATUS"
+          if echo "$LFS_STATUS" | grep -Eqi 'missing|not in local cache'; then
+            echo "ERROR: Git LFS status indicates missing LFS objects. Failing before push to avoid remote rejection."
+            exit 1
+          fi
+
+          git diff --cached --quiet || git commit -m "Deploy from GitHub: ${{ github.sha }}"
+          git push https://huggingface.co/spaces/$HF_SPACE_ID main
