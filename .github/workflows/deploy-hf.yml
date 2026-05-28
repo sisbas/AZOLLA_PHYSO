@@ -41,9 +41,8 @@ jobs:
           npm ci
           npm run build
 
-      - name: Set up Python (using system Python to avoid Node.js 20 deprecation)
+      - name: Set up Python
         run: |
-          # Use system Python instead of setup-python action to avoid Node.js 20 warning
           python3 --version
           pip3 install --upgrade pip
 
@@ -56,10 +55,7 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_SPACE_ID: ${{ secrets.HF_SPACE_ID }}
         run: |
-          # Extract username and space name from space_id
-          SPACE_NAME=$(echo $HF_SPACE_ID | cut -d'/' -f2)
-          
-          # Configure git credentials to avoid password prompt
+          # Configure git credentials
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git config --global user.name "github-actions[bot]"
           git config --global credential.helper store
@@ -76,7 +72,7 @@ jobs:
           git lfs checkout
           cd ..
           
-          # Copy files to the Space (excluding .git folder)
+          # Copy files to the Space (excluding unnecessary folders)
           rsync -av --delete \
             --exclude='.git' \
             --exclude='hf_space' \
@@ -86,19 +82,19 @@ jobs:
             --exclude='*.log' \
             ./ hf_space/
           
-          # Commit and push
+          # Commit and push with LFS validation
           cd hf_space
           git add .
 
-          # Guard checks: ensure regression fixture is LFS-tracked and LFS objects are present
+          # Guard: ensure regression fixture is LFS-tracked
           LFS_FILES=$(git lfs ls-files || true)
           echo "$LFS_FILES"
           if ! echo "$LFS_FILES" | grep -q 'backend/tests/fixtures/regression_frame\.png'; then
             echo "ERROR: backend/tests/fixtures/regression_frame.png is not LFS-tracked in deployment tree."
-            echo "Ensure .gitattributes and file staging are correct before push."
             exit 1
           fi
 
+          # Guard: ensure no missing LFS objects
           LFS_STATUS=$(git lfs status || true)
           echo "$LFS_STATUS"
           if echo "$LFS_STATUS" | grep -Eqi 'missing|not in local cache'; then
