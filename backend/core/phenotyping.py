@@ -44,10 +44,10 @@ class PhenotypeMetrics:
     density_high_percent: float
     
     # Doku analizi (GLCM)
-    texture_contrast: float
-    texture_homogeneity: float
-    texture_energy: float
-    texture_correlation: float
+    texture_contrast: Optional[float]
+    texture_homogeneity: Optional[float]
+    texture_energy: Optional[float]
+    texture_correlation: Optional[float]
     
     # Biyokütle tahmini — kalibrasyon parametreleri ile
     fresh_biomass_g_m2: float
@@ -142,6 +142,7 @@ class PhenotypingModule:
             'yellowing_weight': 0.3,
             'distribution_weight': 0.2
         })
+        self.glcm_min_pixels = int(self.cfg.get('glcm_min_pixels', 32))
         
 
     def _load_calibration_artifact(self, artifact_path: Optional[str]) -> Dict[str, Any]:
@@ -309,7 +310,11 @@ class PhenotypingModule:
             'high': (high_count / total) * 100
         }
     
-    def calculate_glcm_features(self, img: np.ndarray, mask: np.ndarray) -> Dict[str, float]:
+    def calculate_glcm_features(
+        self,
+        img: np.ndarray,
+        mask: np.ndarray
+    ) -> Tuple[Dict[str, Optional[float]], List[Dict[str, Any]]]:
         """
         Doku Analizi - Gri Seviye Eş-Oluşum Matrisi (GLCM)
         
@@ -319,25 +324,50 @@ class PhenotypingModule:
         - Energy: Uniformity ölçüsü
         - Correlation: Piksel korelasyonu
         """
+        texture_none = {
+            'contrast': None,
+            'homogeneity': None,
+            'energy': None,
+            'correlation': None
+        }
+        warnings: List[Dict[str, Any]] = []
         if not np.any(mask):
-            return {
-                'contrast': 0.0,
-                'homogeneity': 0.0,
-                'energy': 0.0,
-                'correlation': 0.0
-            }
+            warnings.append({
+                'step': 'texture_glcm',
+                'message': 'GLCM hesaplanamadı: ROI maskesi boş.',
+                'severity': 'warning'
+            })
+            return texture_none, warnings
         
         try:
-            # Gri seviye görüntü
+            ys, xs = np.where(mask)
+            y0, y1 = int(ys.min()), int(ys.max()) + 1
+            x0, x1 = int(xs.min()), int(xs.max()) + 1
+
+            # ROI bounding box
             gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-            
+            roi_gray = gray[y0:y1, x0:x1]
+            roi_mask = mask[y0:y1, x0:x1]
+            roi_pixels = int(np.sum(roi_mask))
+            if roi_pixels < self.glcm_min_pixels:
+                warnings.append({
+                    'step': 'texture_glcm',
+                    'message': (
+                        f'GLCM atlandı: ROI çok küçük '
+                        f'({roi_pixels} px < eşik {self.glcm_min_pixels} px).'
+                    ),
+                    'severity': 'warning'
+                })
+                return texture_none, warnings
+
+            # Gri seviye görüntü
             # 8-bit'e dönüştür
-            if gray.dtype != np.uint8:
-                gray = (gray * 255).astype(np.uint8)
-            
-            # Maskeli bölge
-            gray_masked = gray.copy()
-            gray_masked[~mask] = 0
+            if roi_gray.dtype != np.uint8:
+                roi_gray = (roi_gray * 255).astype(np.uint8)
+
+            # Maskeli bölge: yalnız ROI içinde komşuluklar değerlendirilsin
+            gray_masked = roi_gray.copy()
+            gray_masked[~roi_mask] = 0
             
             # GLCM hesaplama
             glcm = graycomatrix(gray_masked, distances=[5], angles=[0], levels=256, symmetric=True, normed=True)
@@ -353,15 +383,15 @@ class PhenotypingModule:
                 'homogeneity': float(homogeneity),
                 'energy': float(energy),
                 'correlation': float(correlation)
-            }
+            }, warnings
         except Exception as e:
             logging.warning(f"GLCM calculation failed: {str(e)}")
-            return {
-                'contrast': 0.0,
-                'homogeneity': 0.0,
-                'energy': 0.0,
-                'correlation': 0.0
-            }
+            warnings.append({
+                'step': 'texture_glcm',
+                'message': f'GLCM hesaplaması başarısız: {str(e)}',
+                'severity': 'warning'
+            })
+            return texture_none, warnings
     
     def estimate_biomass(self, coverage_percent: float, chlorophyll_index: float) -> Dict[str, Any]:
         """
@@ -552,7 +582,8 @@ class PhenotypingModule:
             density_dist = self.calculate_density_map(mask_bool)
             
             # 6. Doku analizi (GLCM)
-            texture_features = self.calculate_glcm_features(img_rgb, mask_bool)
+            texture_features, texture_warnings = self.calculate_glcm_features(img_rgb, mask_bool)
+            errors.extend(texture_warnings)
             
             # 7. Biyokütle tahmini
             biomass_estimates = self.estimate_biomass(coverage_percent, chlorophyll_index)
@@ -587,10 +618,10 @@ class PhenotypingModule:
                 density_medium_percent=round(density_dist['medium'], 2),
                 density_high_percent=round(density_dist['high'], 2),
                 
-                texture_contrast=round(texture_features['contrast'], 4),
-                texture_homogeneity=round(texture_features['homogeneity'], 4),
-                texture_energy=round(texture_features['energy'], 4),
-                texture_correlation=round(texture_features['correlation'], 4),
+                texture_contrast=round(texture_features['contrast'], 4) if texture_features['contrast'] is not None else None,
+                texture_homogeneity=round(texture_features['homogeneity'], 4) if texture_features['homogeneity'] is not None else None,
+                texture_energy=round(texture_features['energy'], 4) if texture_features['energy'] is not None else None,
+                texture_correlation=round(texture_features['correlation'], 4) if texture_features['correlation'] is not None else None,
                 
                 fresh_biomass_g_m2=round(biomass_estimates['fresh_biomass_g_m2'], 2),
                 dry_biomass_g_m2=round(biomass_estimates['dry_biomass_g_m2'], 2),
@@ -632,10 +663,10 @@ class PhenotypingModule:
                 density_low_percent=0.0,
                 density_medium_percent=0.0,
                 density_high_percent=0.0,
-                texture_contrast=0.0,
-                texture_homogeneity=0.0,
-                texture_energy=0.0,
-                texture_correlation=0.0,
+                texture_contrast=None,
+                texture_homogeneity=None,
+                texture_energy=None,
+                texture_correlation=None,
                 fresh_biomass_g_m2=0.0,
                 dry_biomass_g_m2=0.0,
                 protein_content_percent=0.0,
