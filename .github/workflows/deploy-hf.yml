@@ -20,8 +20,7 @@ jobs:
       - name: Initialize Git LFS in source repository
         run: |
           git lfs install
-          git lfs fetch --all
-          git lfs checkout
+          git lfs pull
 
       - name: Verify LFS tracking rules
         run: |
