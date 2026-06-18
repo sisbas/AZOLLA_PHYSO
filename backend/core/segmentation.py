@@ -184,10 +184,10 @@ class SegmentationModule:
             else:
                 img_gamma = self.apply_gamma_correction(img_uint8, gamma=1.2)
             
-            # 2. Calculate vegetation indices
-            r = img_gamma[:,:,2].astype(np.float32)
-            g = img_gamma[:,:,1].astype(np.float32)
-            b = img_gamma[:,:,0].astype(np.float32)
+            # 2. Calculate vegetation indices. img_gamma is RGB: channel 0=R, 1=G, 2=B.
+            r = img_gamma[:, :, 0].astype(np.float32)
+            g = img_gamma[:, :, 1].astype(np.float32)
+            b = img_gamma[:, :, 2].astype(np.float32)
             
             exg = self.calculate_exg(img_gamma)
             exg_enhanced = self.calculate_exg_enhanced(img_gamma)

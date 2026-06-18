@@ -492,7 +492,7 @@ class AzollaIsolator:
             # 3. Normalize et (float32, 0-1)
             img_float = img_gamma.astype(np.float32) / 255.0
             
-            # 4. Calculate vegetation indices
+            # 4. Calculate vegetation indices. img_float is RGB: channel 0=R, 1=G, 2=B.
             r = img_float[:, :, 0].astype(np.float32)
             g = img_float[:, :, 1].astype(np.float32)
             b = img_float[:, :, 2].astype(np.float32)

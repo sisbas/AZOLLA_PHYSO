@@ -312,6 +312,7 @@ class AzollaPhenotypingService:
             step2 = self._gray_world_white_balance(step1)
             step3 = self._reduce_reflection(step2)
             preprocessed = self._sharpen(step3)
+            # Service preprocessing uses OpenCV BGR; downstream segmentation/phenotyping indexes expect RGB (0=R, 1=G, 2=B).
             rgb = cv2.cvtColor(preprocessed, cv2.COLOR_BGR2RGB)
             manual_mask = self._resolve_manual_roi_mask(manual_roi=manual_roi, image_shape=image.shape)
             if manual_mask is not None:
