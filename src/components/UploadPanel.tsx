@@ -201,6 +201,8 @@ export default function UploadPanel({ onComplete }: UploadPanelProps) {
       formData.append('file_index[]', String(fileIndex));
     });
     formData.append('experiment_id', `EXP-${Date.now()}`);
+    const parsedPoolArea = 16.0;
+    formData.append('pool_area_m2', String(parsedPoolArea));
 
     try {
       const response = await fetch('/api/v1/predict/series', {
