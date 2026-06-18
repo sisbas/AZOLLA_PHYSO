@@ -1,400 +1,184 @@
-# Azolla-RGB Fenotipleme ve Biyokütle Tahmin Sistemi - Entegrasyon Özeti
+# Azolla RGB Fenotipleme Entegrasyonu
 
-## 🎯 PROJE AMAÇI
-Havuz/konteyner yetiştiriciliğinde yetiştirilen Azolla microphylla türlerinin RGB görüntülerinden otomatik olarak fenotipik özelliklerini çıkaran, büyüme performansını izleyen ve biyokütle üretimi tahmin eden bir görüntü işleme pipeline'ı geliştirilmiştir.
+Bu belge, repoda gerçekten bulunan dizinlere göre fenotipleme entegrasyonunun güncel durumunu özetler.
 
----
+## Amaç
 
-## ✅ TAMAMLANAN İŞLER
+Azolla görüntülerinden kaplama, renk indeksleri, stres göstergeleri, doku metrikleri, yoğunluk dağılımı ve biyokütle tahmini üretmek; bu çıktıları web arayüzü ve API üzerinden kullanılabilir hale getirmek.
 
-### 1. BACKEND ENTEGRASYONU
+## Mevcut entegrasyon noktaları
 
-#### Yeni Modül: `backend/core/phenotyping.py`
-- **PhenotypeMetrics**: Fenotipik ölçüm metrikleri için dataclass
-- **PhenotypingModule**: Ana işleme modülü
+### Web uygulaması
 
-**Özellikler:**
-- ✅ Segmentasyon sonuçları (alan, kaplama yüzdesi)
-- ✅ Renk bazlı indeksler (AGI, SACI, Klorofil)
-- ✅ Stres belirleme (kahverengileşme, sararma)
-- ✅ Yoğunluk haritası analizi
-- ✅ Doku analizi (GLCM metrikleri)
-- ✅ Biyokütle tahmini (taze/kuru ağırlık, protein)
-- ✅ Büyüme parametreleri (büyüme hızı, katlanma süresi)
+- React/Vite arayüzü `src/` altında bulunur.
+- Fenotipleme ekranı `src/components/PhenotypingView.tsx` dosyasında uygulanmıştır.
+- Uygulama giriş noktaları `src/main.tsx` ve `src/App.tsx` dosyalarıdır.
+- Geliştirme sunucusu ve Express API `server.ts` ile repo kökünden çalışır.
 
-#### Pipeline Runner Güncellemesi (`backend/pipeline_runner.py`)
-```python
-# Fenotipleme modülü eklendi
-self.pheno = PhenotypingModule(self.config)
+### Express + Python köprüsü
 
-# run_single_frame fonksiyonu güncellendi
-phenotype_metrics = self.pheno.process(img_rgb, opt_mask)
-results["phenotyping"] = self.pheno.to_dict(phenotype_metrics)
-```
+- `server.ts`, `/api` altında Express endpoint'lerini tanımlar.
+- Seri analiz ve fenotipleme isteklerinde Python işlemesi için `backend/bridge.py` çağrılır.
+- `backend/bridge.py`, `backend/azolla_processor.py` içindeki işlemciyi kullanır.
+- Fenotipleme çekirdeği `backend/core/phenotyping.py` dosyasında bulunur.
 
-#### Core Module Export (`backend/core/__init__.py`)
-```python
-from .phenotyping import PhenotypingModule, PhenotypeMetrics
+### Bağımsız FastAPI uygulaması
 
-__all__ = [
-    ...
-    "PhenotypingModule",
-    "PhenotypeMetrics",
-]
-```
+- `backend/main.py`, ayrı çalıştırılabilen FastAPI uygulamasıdır.
+- Batch fenotipleme servis mantığı `backend/phenotyping_service.py` içindedir.
+- API yanıt şeması `backend/schemas/phenotyping_analyze_response.v1.json` altında sürümlenir.
+- Minimal örnek yanıt `fixtures/phenotyping/analyze_response.v1.min.json` dosyasında bulunur.
 
----
+### Stres algılama paketi
 
-### 2. FRONTEND ENTEGRASYONU
+`azolla_stress_detection/src/` ayrı bir paket yapısıdır:
 
-#### Yeni Sayfa: `(repo içinde mevcut değil; backend odaklı entegrasyon)`
-- Modern, responsive dashboard tasarımı
-- MetricCard bileşeni ile görsel metrik kartları
-- Recharts ile grafik visualizasyonları
+- `azolla_stress_detection/src/cv/`: CV pipeline, segmentasyon, normalizasyon ve özellik çıkarımı.
+- `azolla_stress_detection/src/ml/`: Model, eğitim, kalibrasyon ve tahmin bileşenleri.
+- `azolla_stress_detection/src/data/`: Görüntü ve Excel veri yükleyicileri.
+- `azolla_stress_detection/src/dashboard/`: Paket içi dashboard uygulaması.
 
-**Bölümler:**
-1. **Segmentasyon Sonuçları**
-   - Azolla kaplama alanı (m²)
-   - Kaplama yüzdesi (%)
-   - Toplam piksel, su yüzeyi
+## API endpoint durumu
 
-2. **Renk Bazlı İndeksler**
-   - AGI (Yeşillik İndeksi)
-   - SACI (Kontrast İndeksi)
-   - Klorofil Durum İndeksi
+| Endpoint | Durum | Path | Açıklama |
+| --- | --- | --- | --- |
+| `GET /api/health` | implemented | `server.ts` | Express health endpoint'i. |
+| `POST /api/v1/predict/series` | implemented | `server.ts`, `backend/bridge.py` | Çoklu dosya analizi. Form alanı: `images`. |
+| `GET /api/v1/tasks/:id/status` | implemented | `server.ts` | Express görev durumunu verir. |
+| `GET /api/v1/tasks/:id/results` | implemented | `server.ts` | Express görev sonucunu verir. |
+| `GET /api/v1/settings` | implemented | `server.ts` | `config.json` okur. |
+| `POST /api/v1/settings` | implemented | `server.ts` | `config.json` günceller. |
+| `POST /api/v1/insights` | implemented | `server.ts` | Gemini anahtarı varsa AI yorum üretir. |
+| `POST /api/v1/phenotyping/analyze` | implemented | `server.ts`, `backend/bridge.py` | Express sürümü tek `image` alanı ve `pool_area_m2` kabul eder. |
+| `GET /api/v1/health` | implemented | `backend/main.py` | FastAPI uygulaması içindir. |
+| `POST /api/v1/predict/series` | implemented | `backend/main.py`, `backend/pipeline_runner.py` | FastAPI seri analiz sürümü. |
+| `GET /api/v1/tasks/{task_id}/status` | implemented | `backend/main.py` | FastAPI görev durumu. |
+| `GET /api/v1/tasks/{task_id}/results` | implemented | `backend/main.py` | FastAPI görev sonucu. |
+| `POST /api/v1/phenotyping/analyze` batch sürümü | implemented | `backend/main.py`, `backend/phenotyping_service.py` | FastAPI sürümü `images`, `group_name`, `timepoint`, opsiyonel `replicate_id`, `manual_roi`, `start_date`, `end_date` bekler. |
+| WebSocket real-time streaming | planned | — | Uygulanmış WebSocket endpoint'i bulunmuyor. |
+| Kalibrasyon veri girişi API'si | planned | — | Ayrı kalibrasyon endpoint'i bulunmuyor. |
+| PDF/email raporlama API'si | planned | — | Ayrı raporlama endpoint'i bulunmuyor. |
 
-3. **Stres Belirleme**
-   - Kahverengileşme oranı
-   - Sararma indeksi
-   - Toplam stres skoru
+## Quick Start
 
-4. **Yoğunluk Haritası**
-   - Düşük/Orta/Yüksek yoğunluk dağılımı
-   - Pasta grafik visualization
+Repo kökünden tek doğru yerel geliştirme akışı:
 
-5. **Biyokütle Tahmini**
-   - Taze ağırlık (g/m²)
-   - Kuru madde (g/m²)
-   - Protein içeriği (%)
-
-6. **Büyüme Analizi**
-   - Büyüme hızı (%/gün)
-   - Katlanma süresi (gün)
-   - Maksimum kaplama
-
-7. **Doku Analizi (GLCM)**
-   - Contrast, Homogeneity, Energy, Correlation
-   - Bar chart visualization
-
-#### App.tsx Güncellemeleri
-```typescript
-// Yeni view state
-export type ViewState = 'upload' | 'analysis' | 'settings' | 'roi' | 'phenotyping';
-
-// Navigation'a yeni buton eklendi
-<button onClick={() => setView('phenotyping')}>
-  <Microscope size={12} />
-  Fenotipleme
-</button>
-
-// Route handling
-{view === 'phenotyping' ? (
-  <PhenotypingView />
-) : ...}
-```
-
----
-
-## 📊 ALGORİTMA DETAYLARI
-
-### Renk İndeksleri Formülleri
-
-```python
-# Azolla Yeşillik İndeksi (AGI)
-AGI = (2×G - R - B) / (2×G + R + B)
-# Değer aralığı: [-1, 1], yüksek değer = sağlıklı yeşil
-
-# Su-Azolla Kontrast İndeksi (SACI)
-SACI = (G - B) / (G + B + 0.001)
-# Su yüzeyi ile azolla ayrımını iyileştirir
-
-# Klorofil Durum İndeksi
-Chl-Azolla = G / (R + 0.01)
-# Yüksek değer = yüksek klorofil içeriği
-```
-
-### Stres Belirleme
-
-```python
-# Kahverengileşme: R > B > G piksel yüzdesi
-browning_percent = (R>B>G pikseller / toplam pikseller) × 100
-
-# Sararma: G < R ve G < B piksel yüzdesi
-yellowing_percent = (G<R ve G<B pikseller / toplam pikseller) × 100
-
-# Stres skoru (ağırlıklı ortalama)
-stress_score = browning × 0.6 + yellowing × 0.4
-```
-
-### Biyokütle Tahmin Modeli
-
-```python
-# Kalibrasyon modeli
-taze_ağırlık (g/m²) = α × kaplama_yüzdesi + β
-# α = 5.75 g/m² per % coverage
-# β = 10.0 g/m² base offset
-
-# Kuru madde (%8 tipik Azolla için)
-kuru_ağırlık = taze_ağırlık × 0.08
-
-# Protein içeriği (klorofil-korelasyonlu)
-protein (%) = 25 + 10 × (Chl_index / 10.0)
-# Aralık: %25-35
-```
-
-### Büyüme Parametreleri
-
-```python
-# Büyüme hızı
-r = ln(A₂/A₁) / (t₂-t₁) × 100  # %/gün
-
-# Katlanma süresi
-T_d = ln(2) / r  # gün
-
-# Lojistik büyüme modeli
-A(t) = K / (1 + e^(-r(t-t₀)))
-```
-
----
-
-## 🔧 TEKNİK SPESİFİKASYONLAR
-
-### Backend Gereksinimler
-- Python 3.9+
-- OpenCV 4.5+
-- scikit-image 0.18+
-- NumPy, Pandas
-- scikit-learn
-
-### Frontend Gereksinimler
-- React 18+
-- TypeScript
-- TailwindCSS
-- Recharts
-- Motion (animasyonlar)
-- Lucide React (ikonlar)
-
-### Çalışma Hızı
-- <5 saniye/görüntü (1920×1080)
-- Gerçek zamanlı processing desteği
-
----
-
-## 📁 ÇIKTI DOSYALARI
-
-### API Response Format
-```json
-{
-  "phenotyping": {
-    "segmentasyon": {
-      "azolla_area_pixels": 1245678,
-      "azolla_area_m2": 12.46,
-      "coverage_percent": 78.3,
-      "water_surface_percent": 21.7
-    },
-    "renk_indeksleri": {
-      "agi_index": 0.65,
-      "saci_index": 0.42,
-      "chlorophyll_index": 1.85
-    },
-    "stres_analizi": {
-      "browning_percent": 2.1,
-      "yellowing_percent": 1.8,
-      "stress_score": 3.2
-    },
-    "yogunluk_dagilimi": {
-      "low_percent": 15.0,
-      "medium_percent": 45.0,
-      "high_percent": 40.0
-    },
-    "doku_analizi": {
-      "contrast": 0.45,
-      "homogeneity": 0.78,
-      "energy": 0.32,
-      "correlation": 0.89
-    },
-    "biyokutle_tahmini": {
-      "fresh_biomass_g_m2": 460.5,
-      "dry_biomass_g_m2": 36.8,
-      "protein_content_percent": 31.5
-    },
-    "buyume_parametreleri": {
-      "growth_rate_percent_day": 12.5,
-      "doubling_time_days": 5.5,
-      "max_coverage_percent": 78.3
-    }
-  }
-}
-```
-
----
-
-## 🎨 KULLANICI ARAYÜZÜ
-
-### Navigasyon
-- Header'da yeni "Fenotipleme" butonu (🔬 ikonlu)
-- Aktif durumda emerald yeşili vurgu
-- Responsive tasarım
-
-### Dashboard Layout
-- 4 sütunlu grid sistem
-- Renkli metrik kartları (gradient header'lar)
-- İnteraktif grafikler (pie chart, bar chart)
-- Real-time veri güncelleme
-
----
-
-## ✅ TEST SONUÇLARI
-
-### Backend Test
 ```bash
-$ python -c "from backend.core.phenotyping import PhenotypingModule; ..."
-Fenotipleme testi basarili!
-Kaplama yuzdesi: 25.0%
-AGI index: -0.0473
-Taze biyokutle: 153.75 g/m2
+npm install
+python3 -m pip install -r backend/requirements.txt
+npm run dev
 ```
 
-### Import Testleri
-- ✅ `PhenotypingModule` import başarılı
-- ✅ `PhenotypeMetrics` import başarılı
-- ✅ `AzollaPipeline` fenotipleme modülü ile yükleniyor
-- ✅ Tüm bağımlılıklar mevcut
+Bu akış `server.ts` dosyasını çalıştırır, Express API'yi ve Vite geliştirme middleware'ini aynı portta başlatır. Varsayılan port `7860` değeridir; `PORT` ortam değişkeniyle değiştirilebilir.
 
----
+## Fenotipleme kullanım örnekleri
 
-## 🚀 KULLANIM
+### Express endpoint örneği
 
-### Backend API
-```python
-from backend.core import PhenotypingModule
-
-config = {'phenotyping': {'biomass_alpha': 5.75}}
-module = PhenotypingModule(config)
-
-metrics = module.process(img_rgb, mask)
-result_dict = module.to_dict(metrics)
+```bash
+curl -X POST http://localhost:7860/api/v1/phenotyping/analyze \
+  -F "image=@sample.jpg" \
+  -F "pool_area_m2=16"
 ```
 
-### Frontend Erişim
-1. Uygulamayı başlat
-2. Header'dan "Fenotipleme" butonuna tıkla
-3. Dashboard otomatik yüklenir
-4. API entegrasyonu için backend'e bağlan
+Bu endpoint `server.ts` tarafından uygulanır ve Python tarafında `backend/bridge.py` çalıştırılır.
 
----
+### FastAPI batch endpoint örneği
 
-## 📈 BAŞARI KRİTERLERİ
+FastAPI uygulaması ayrıca çalıştırılırsa:
 
-- ✅ %85+ segmentasyon doğruluğu (pipeline'dan devralınıyor)
-- ✅ %90+ biyokütle tahmin korelasyonu (kalibrasyon ile)
-- ✅ <5 saniye işlem süresi
-- ✅ Modern, kullanıcı dostu arayüz
-- ✅ Tam Türkçe dil desteği
+```bash
+python3 backend/main.py
+```
 
----
-
-## 🔮 GELECEK GELİŞTİRMELER
-
-1. **API Endpoint Entegrasyonu**
-   - `/api/v1/phenotyping` endpoint'i
-   - WebSocket real-time streaming
-
-2. **Kalibrasyon Aracı**
-   - Manuel tartım verisi girişi
-   - α, β katsayıları optimizasyonu
-
-3. **Zamansal Analiz**
-   - Çoklu zaman noktası karşılaştırması
-   - Büyüme eğrisi fitting
-
-4. **Raporlama**
-   - PDF export
-   - CSV download
-   - Email bildirimleri
-
----
-
-## 📝 NOTLAR
-
-- Korelasyon ≠ nedensellik. Bu skor erken uyarı indeksidir; biyokimyasal validasyon gerektirir.
-- Kalibrasyon katsayıları deneysel olarak belirlenmelidir (10-15 havuz veri seti)
-- Pixel-to-m² dönüşümü kamera kalibrasyonuna göre ayarlanmalıdır
-
----
-
-**Proje Tarihi:** 2024
-**Versiyon:** 1.0.0
-**Durum:** ✅ Backend + Frontend Entegrasyonu Tamamlandı
-
-## Tarih Aralığı Karşılaştırması (Yeni)
-
-Fenotipleme endpoint'i geriye dönük uyumlu şekilde iki opsiyonel alan kabul eder:
-
-- `start_date` (`YYYY-MM-DD`)
-- `end_date` (`YYYY-MM-DD`)
-
-> Not: Bu alanlar birlikte gönderilmelidir. Sadece biri gönderilirse doğrulama hatası döner.
-
-### Örnek istek
+Batch fenotipleme isteği:
 
 ```bash
 curl -X POST http://localhost:3000/api/v1/phenotyping/analyze \
-  -F "image=@sample.jpg" \
+  -F "images=@sample.jpg" \
+  -F "group_name=control" \
+  -F "timepoint=t0" \
   -F "pool_area_m2=16" \
   -F "start_date=2026-01-01" \
   -F "end_date=2026-02-12"
 ```
 
-### Örnek çıktı parçası
+`start_date` ve `end_date` birlikte gönderilmelidir. Tek başına gönderilen tarih alanı doğrulama hatası üretir.
+
+## Çıktı yapısı
+
+Express fenotipleme endpoint'i tek görüntü için şu ana bölümleri döndürür:
+
+- `timestamp`
+- `segmentasyon`
+- `renk_indeksleri`
+- `stres_analizi`
+- `yogunluk_dagilimi`
+- `doku_analizi`
+- `biyokutle_tahmini`
+- `buyume_parametreleri`
+- `errors`
+- `images`
+
+FastAPI batch fenotipleme endpoint'i sürümlü zarf döndürür:
 
 ```json
 {
-  "date_comparison": {
-    "days_diff": 42,
-    "start_date": "2026-01-01",
-    "end_date": "2026-02-12"
+  "schema_version": "1.0.0",
+  "data": {
+    "results": [],
+    "group_comparisons": [],
+    "batch_report": {
+      "mask_validity_distribution": {}
+    }
   }
 }
 ```
 
-### Hata durumları
+## Notlar
 
-- `Geçersiz start_date formatı: '...'. Beklenen format: YYYY-MM-DD.`
-- `Geçersiz end_date formatı: '...'. Beklenen format: YYYY-MM-DD.`
-- `Geçersiz tarih aralığı: start_date, end_date değerinden büyük olamaz.`
-- `start_date ve end_date birlikte gönderilmelidir (ikisi de opsiyonel).`
+- Biyokütle ve protein tahminleri kalibrasyon varsayımlarına bağlıdır; deneysel tartım/validasyon verisiyle doğrulanmalıdır.
+- Korelasyon, nedensellik anlamına gelmez; stres skoru erken uyarı indeksidir.
+- Pixel-to-m² dönüşümü saha/kamera kalibrasyonuna bağlıdır.
 
-Eski çağrılar (`start_date`/`end_date` göndermeyen) aynı şekilde çalışmaya devam eder.
+## Verified paths
 
----
+Bu belge güncellenirken doğrulanan dizinler ve dosyalar:
 
-## 🔄 DİZİN SENKRONİZASYONU (2026-05-23)
-
-Bu repodaki gerçek backend dosya yolları:
-- `backend/core/phenotyping.py`
+- `src/`
+- `src/App.tsx`
+- `src/main.tsx`
+- `src/components/PhenotypingView.tsx`
+- `server.ts`
+- `backend/`
+- `backend/bridge.py`
+- `backend/azolla_processor.py`
+- `backend/main.py`
 - `backend/pipeline_runner.py`
-- `backend/core/__init__.py`
-- `backend/__init__.py`
+- `backend/phenotyping_service.py`
+- `backend/core/phenotyping.py`
+- `backend/config.yaml`
+- `backend/requirements.txt`
+- `backend/schemas/phenotyping_analyze_response.v1.json`
+- `fixtures/phenotyping/analyze_response.v1.min.json`
+- `azolla_stress_detection/src/`
+- `azolla_stress_detection/src/cv/`
+- `azolla_stress_detection/src/ml/`
+- `azolla_stress_detection/src/data/`
+- `azolla_stress_detection/src/dashboard/`
+- `azolla_stress_detection/configs/config.yaml`
+- `azolla_stress_detection/requirements.txt`
+- `package.json`
+- `config.json`
 
-Fenotipleme API şema sürümlemesi:
-- JSON Schema: `backend/schemas/phenotyping_analyze_response.v1.json`
-- Örnek fixture: `fixtures/phenotyping/analyze_response.v1.min.json`
+Doğrulanan repo-kökü komutları:
 
-`POST /api/v1/phenotyping/analyze` artık sürümlü zarf döndürür:
-```json
-{
-  "schema_version": "1.0.0",
-  "data": { ... }
-}
-```
+- `npm install`
+- `python3 -m pip install -r backend/requirements.txt`
+- `npm run dev`
+- `python3 backend/main.py`
+- `curl -X POST http://localhost:7860/api/v1/phenotyping/analyze -F "image=@sample.jpg" -F "pool_area_m2=16"`
+- `curl -X POST http://localhost:3000/api/v1/phenotyping/analyze -F "images=@sample.jpg" -F "group_name=control" -F "timepoint=t0" -F "pool_area_m2=16" -F "start_date=2026-01-01" -F "end_date=2026-02-12"`
+- `npm run lint`
+- `npm run build`
+- `python3 -m pytest backend/tests azolla_stress_detection/tests`
