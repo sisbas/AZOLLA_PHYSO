@@ -77,7 +77,34 @@
                     "type": "object"
                   },
                   "doku_analizi": {
-                    "type": "object"
+                    "type": "object",
+                    "properties": {
+                      "contrast": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "homogeneity": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "energy": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "correlation": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      }
+                    },
+                    "additionalProperties": true
                   },
                   "biyokutle_tahmini": {
                     "type": "object"
