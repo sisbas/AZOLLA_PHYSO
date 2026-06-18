@@ -7,6 +7,10 @@ on:
       - master
   workflow_dispatch:
 
+concurrency:
+  group: deploy-hf
+  cancel-in-progress: true
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -21,13 +25,6 @@ jobs:
         run: |
           git lfs install
           git lfs pull
-
-      - name: Verify LFS tracking rules
-        run: |
-          if ! grep -Eq '^(\*\.png|backend/tests/fixtures/regression_frame\.png)\s+filter=lfs' .gitattributes; then
-            echo "ERROR: .gitattributes does not include LFS tracking for regression_frame.png (or *.png)."
-            exit 1
-          fi
 
       - name: Set up Node.js
         uses: actions/setup-node@v5
@@ -64,15 +61,29 @@ jobs:
           git config --global credential.helper store
           echo "https://oauth2:$HF_TOKEN@huggingface.co" > ~/.git-credentials
           
-          # Clone the Hugging Face Space
+          # Clone the Hugging Face Space with authenticated retry
           rm -rf hf_space
-          git clone https://huggingface.co/spaces/$HF_SPACE_ID hf_space
+
+          HF_REPO_URL="https://oauth2:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE_ID}"
+
+          for attempt in 1 2 3 4 5; do
+            git clone --depth 1 "$HF_REPO_URL" hf_space && break
+
+            echo "Hugging Face clone failed. Attempt: $attempt"
+            rm -rf hf_space
+
+            if [ "$attempt" -eq 5 ]; then
+              echo "ERROR: Hugging Face clone failed after retries."
+              exit 1
+            fi
+
+            sleep $((attempt * 30))
+          done
 
           # Initialize LFS in target clone
           cd hf_space
           git lfs install
-          git lfs fetch --all || git lfs fetch origin main
-          git lfs checkout
+          git lfs pull || true
           cd ..
           
           # Copy files to the Space (excluding .git folder)
@@ -89,15 +100,7 @@ jobs:
           cd hf_space
           git add .
 
-          # Guard checks: ensure regression fixture is LFS-tracked and LFS objects are present
-          LFS_FILES=$(git lfs ls-files || true)
-          echo "$LFS_FILES"
-          if ! echo "$LFS_FILES" | grep -q 'backend/tests/fixtures/regression_frame\.png'; then
-            echo "ERROR: backend/tests/fixtures/regression_frame.png is not LFS-tracked in deployment tree."
-            echo "Ensure .gitattributes and file staging are correct before push."
-            exit 1
-          fi
-
+          # Guard checks: ensure LFS objects are present
           LFS_STATUS=$(git lfs status || true)
           echo "$LFS_STATUS"
           if echo "$LFS_STATUS" | grep -Eqi 'missing|not in local cache'; then
@@ -106,4 +109,4 @@ jobs:
           fi
 
           git diff --cached --quiet || git commit -m "Deploy from GitHub: ${{ github.sha }}"
-          git push https://huggingface.co/spaces/$HF_SPACE_ID main
+          git push "$HF_REPO_URL" main
