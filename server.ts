@@ -155,13 +155,14 @@ async function startServer() {
       }
 
       const experimentId = req.body.experiment_id || uuidv4();
+      const poolAreaM2 = parseFloat(req.body.pool_area_m2 || "16.0");
       const taskId = uuidv4();
 
       tasks[taskId] = { id: taskId, status: "processing", progress: 0, stage: "queued" };
 
       // Run pipeline in background
       const timestamps = resolveSeriesTimestamps(files, req.body.timestamps);
-      processImages(taskId, files, timestamps, experimentId).catch((err) => {
+      processImages(taskId, files, timestamps, experimentId, poolAreaM2).catch((err) => {
         console.error("Pipeline Error:", err);
         tasks[taskId].status = "failed";
     tasks[taskId].stage = "failed";
@@ -454,7 +455,7 @@ async function runPythonPipeline(imageBuffer: Buffer, filename: string, poolArea
   });
 }
 
-async function processImages(taskId: string, files: Express.Multer.File[], timestamps: string[], experimentId: string) {
+async function processImages(taskId: string, files: Express.Multer.File[], timestamps: string[], experimentId: string, poolAreaM2 = 16.0) {
   const results = [];
   const total = files.length;
   let processingErrors = [];
@@ -469,7 +470,7 @@ async function processImages(taskId: string, files: Express.Multer.File[], times
       
       logger.info(`Processing file ${i+1}/${total}: ${file.originalname}`);
       
-      const pythonRes = await runPythonPipeline(file.buffer, file.originalname);
+      const pythonRes = await runPythonPipeline(file.buffer, file.originalname, poolAreaM2);
       
       results.push({
         filename: file.originalname,
