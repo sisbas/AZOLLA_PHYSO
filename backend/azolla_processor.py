@@ -12,9 +12,10 @@ import logging
 import json
 from datetime import datetime
 from dataclasses import dataclass, asdict
-from typing import Dict, List, Optional, Any, Union
+from typing import Any, Dict, List, Optional, Union
 from PIL import Image
 from PIL.ExifTags import TAGS
+from core.image_input import ImageInputError, load_image_input
 from core.phenotyping import PhenotypingModule
 
 # Setup logging
@@ -56,24 +57,16 @@ class AzollaProcessor:
         phenotyping_config = config.get("phenotyping", {}) if config else {}
         self.phenotyping = PhenotypingModule({"phenotyping": phenotyping_config})
 
-    def load_and_validate(self, image_input: Union[str, bytes]) -> np.ndarray:
-        """
-        Load image from path or bytes and validate format.
-        """
+    def load_and_validate(self, image_input: Any) -> np.ndarray:
+        """Load image input via the shared adapter and return service-standard BGR."""
         try:
-            if isinstance(image_input, str):
-                image = cv2.imread(image_input)
-            else:
-                nparr = np.frombuffer(image_input, np.uint8)
-                image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-            
-            if image is None:
-                raise ProcessingError("Görüntü yüklenemedi veya format geçersiz.")
-            
-            return image
+            return load_image_input(image_input, color_space="BGR")
+        except ImageInputError as e:
+            logger.error(f"Validation error: {str(e)}")
+            raise ProcessingError(f"Yükleme hatası: {str(e)}") from e
         except Exception as e:
             logger.error(f"Validation error: {str(e)}")
-            raise ProcessingError(f"Yükleme hatası: {str(e)}")
+            raise ProcessingError(f"Yükleme hatası: {str(e)}") from e
 
     def isolate_and_segment(self, image: np.ndarray) -> np.ndarray:
         """
@@ -248,7 +241,7 @@ class AzollaProcessor:
         
         return datetime.now().strftime('%Y-%m-%d %H:%M')
 
-    def run_pipeline(self, image_input: Union[str, bytes], image_path: Optional[str] = None, pool_area_m2: float = 16.0) -> Dict[str, Any]:
+    def run_pipeline(self, image_input: Any, image_path: Optional[str] = None, pool_area_m2: float = 16.0) -> Dict[str, Any]:
         """
         Execute full pipeline and return structured result.
         """

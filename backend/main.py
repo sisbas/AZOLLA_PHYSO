@@ -2,8 +2,6 @@
 import uvicorn
 import shutil
 import os
-import cv2
-import numpy as np
 from fastapi import FastAPI, UploadFile, File, BackgroundTasks, HTTPException, Form
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError
@@ -14,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from backend.pipeline_runner import AzollaPipeline
 from backend.phenotyping_service import AzollaPhenotypingService
 from backend.logger import get_logger
+from backend.core.image_input import ImageInputError, load_image_input
 
 logger = get_logger("main")
 
@@ -145,16 +144,16 @@ async def process_series_task(task_id: str, experiment_id: str, images: List[Upl
         
         for i, (img_file, ts) in enumerate(zip(images, timestamps)):
             try:
-                # Read image
-                contents = await img_file.read()
-                nparr = np.frombuffer(contents, np.uint8)
-                img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                
-                if img is not None:
-                    frame_tuples.append((img, ts))
-                    logger.debug(f"Loaded image {i+1}/{len(images)} with timestamp {ts}")
-                else:
-                    logger.warning(f"Failed to decode image {i+1}: {img_file.filename}")
+                # Service boundary standard: decode once to BGR via the shared adapter.
+                img = load_image_input(img_file, color_space="BGR")
+                frame_tuples.append((img, ts))
+                logger.debug(f"Loaded image {i+1}/{len(images)} with timestamp {ts}")
+            except ImageInputError as e:
+                logger.error(f"Error loading image {img_file.filename}: {str(e)}", exc_info=True)
+                tasks[task_id].setdefault("errors", []).append({
+                    "file": img_file.filename,
+                    "error": e.payload,
+                })
             except Exception as e:
                 logger.error(f"Error loading image {img_file.filename}: {str(e)}", exc_info=True)
                 tasks[task_id].setdefault("errors", []).append({
@@ -274,12 +273,12 @@ async def analyze_phenotyping(
 
         results_with_meta: List[Dict[str, Any]] = []
         for idx, image in enumerate(images):
-            contents = await image.read()
-            nparr = np.frombuffer(contents, np.uint8)
-            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-            if img is None:
+            try:
+                # Service boundary standard: BGR. Phenotyping service owns any RGB conversion it needs.
+                img = load_image_input(image, color_space="BGR")
+            except ImageInputError as exc:
                 logger.warning("Failed to decode phenotyping image: %s", image.filename)
-                raise HTTPException(status_code=400, detail=f"Geçersiz görüntü dosyası: {image.filename}")
+                raise HTTPException(status_code=400, detail=exc.payload) from exc
 
             parsed_manual_roi = None
             if manual_roi is not None and manual_roi[idx]:
