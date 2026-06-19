@@ -22,7 +22,7 @@ logging.basicConfig(
 logger = logging.getLogger("AzollaBridge")
 
 import cv2
-import numpy as np
+from core.image_input import ImageInputError, load_image_input
 from azolla_processor import AzollaProcessor, ProcessingError
 
 def create_error_response(message: str, step: str = "unknown", details: dict = None) -> dict:
@@ -88,33 +88,17 @@ def main():
             )))
             return
         
-        # Decode image with error handling
+        # Decode and validate image with the shared adapter. Service boundary standard is BGR.
         context["step"] = "decoding_image"
         try:
-            image_bytes = base64.b64decode(image_b64)
-            logger.info(f"Image decoded successfully ({len(image_bytes)} bytes)")
-        except Exception as e:
-            logger.error(f"Base64 decoding failed: {str(e)}")
-            print(json.dumps(create_error_response(
-                f"Image decoding failed: {str(e)}",
-                "base64_decoding",
-                {"error_type": type(e).__name__}
-            )))
-            return
-        
-        # Validate image data
-        try:
-            nparr = np.frombuffer(image_bytes, np.uint8)
-            test_img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-            if test_img is None:
-                raise ValueError("OpenCV could not decode the image")
-            logger.info(f"Image validated: {test_img.shape}")
-        except Exception as e:
+            image = load_image_input(image_b64, color_space="BGR")
+            logger.info(f"Image validated: {image.shape}")
+        except ImageInputError as e:
             logger.error(f"Image validation failed: {str(e)}")
             print(json.dumps(create_error_response(
                 f"Invalid image format: {str(e)}",
                 "image_validation",
-                {"filename": filename}
+                {"filename": filename, "error": e.payload}
             )))
             return
         
@@ -127,7 +111,7 @@ def main():
             processor = AzollaProcessor(config=config)
             logger.info("AzollaProcessor initialized")
             
-            result = processor.run_pipeline(image_bytes, image_path=filename, pool_area_m2=pool_area_m2)
+            result = processor.run_pipeline(image, image_path=filename, pool_area_m2=pool_area_m2)
             logger.info("Pipeline completed successfully")
             
         except ProcessingError as e:
