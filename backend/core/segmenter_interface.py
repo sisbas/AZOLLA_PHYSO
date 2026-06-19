@@ -9,7 +9,7 @@ import numpy as np
 
 
 class SegmenterInterface(Protocol):
-    def process(self, image_rgb: np.ndarray) -> Tuple[np.ndarray, Any, Dict[str, Any]]:
+    def process(self, image_rgb: np.ndarray, preprocessing_metadata: Dict[str, Any] | None = None) -> Tuple[np.ndarray, Any, Dict[str, Any]]:
         """Return (mask_uint8_255, qc, extras)."""
 
 
@@ -56,7 +56,7 @@ class DefaultSegmenter(SegmenterInterface):
         from .segmentation import SegmentationModule
         self._segmentation = SegmentationModule(config or {})
 
-    def process(self, image_rgb: np.ndarray) -> Tuple[np.ndarray, Any, Dict[str, Any]]:
-        raw_mask, qc, extras = self._segmentation.process(image_rgb)
+    def process(self, image_rgb: np.ndarray, preprocessing_metadata: Dict[str, Any] | None = None) -> Tuple[np.ndarray, Any, Dict[str, Any]]:
+        raw_mask, qc, extras = self._segmentation.process(image_rgb, preprocessing_metadata=preprocessing_metadata)
         mask = standardize_mask(raw_mask)
         return mask, qc, extras

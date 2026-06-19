@@ -41,6 +41,10 @@ class PreprocessingMetadata:
     denoise_method: str
     contrast_method: str
     color_space: str
+    gamma_estimated: float
+    gamma_applied: bool
+    clahe_applied: bool
+    already_preprocessed: bool
     timestamp: str
     exif_info: Dict[str, Any]
     warnings: List[Dict[str, Any]]
@@ -58,6 +62,10 @@ class PreprocessingMetadata:
             "denoise_method": self.denoise_method,
             "contrast_method": self.contrast_method,
             "color_space": self.color_space,
+            "gamma_estimated": self.gamma_estimated,
+            "gamma_applied": self.gamma_applied,
+            "clahe_applied": self.clahe_applied,
+            "already_preprocessed": self.already_preprocessed,
             "timestamp": self.timestamp,
             "exif_info": self.exif_info,
             "warnings": self.warnings,
@@ -107,6 +115,10 @@ class ImagePreprocessor:
         self.clahe_clip_limit = self.cfg.get('clahe_clip_limit', 2.0)
         self.clahe_grid_size = tuple(self.cfg.get('clahe_grid_size', [8, 8]))
         self.normalize_channels = self.cfg.get('normalize_channels', True)
+        self.apply_gamma = self.cfg.get('apply_gamma', True)
+        self.auto_gamma = self.cfg.get('auto_gamma', True)
+        self.gamma = self.cfg.get('gamma', 1.2)
+        self.apply_clahe = self.cfg.get('apply_clahe', False)
         
         # Denoise method preference
         self.preferred_denoise = self.cfg.get('preferred_denoise', 'gaussian')
@@ -292,6 +304,27 @@ class ImagePreprocessor:
         # uint8 -> float32, 0-1 aralığı
         return image.astype(np.float32) / 255.0
     
+
+    def estimate_gamma(self, image: np.ndarray) -> float:
+        """Histogram parlaklığına göre gamma değerini merkezi olarak tahmin eder."""
+        img_uint8 = (np.clip(image, 0, 1) * 255).astype(np.uint8) if image.dtype in (np.float32, np.float64) else image
+        gray = cv2.cvtColor(img_uint8, cv2.COLOR_RGB2GRAY)
+        mean_val = float(np.mean(gray))
+        if mean_val < 80:
+            return 0.8
+        if mean_val > 180:
+            return 1.5
+        return float(self.gamma)
+
+    def apply_gamma_correction(self, image: np.ndarray, gamma: float) -> np.ndarray:
+        """RGB görüntüye gamma düzeltmesini uygular ve giriş dtype aralığını korur."""
+        was_float = image.dtype in (np.float32, np.float64)
+        img_uint8 = (np.clip(image, 0, 1) * 255).astype(np.uint8) if was_float else image.copy()
+        inv_gamma = 1.0 / max(float(gamma), 1e-6)
+        table = np.array([((i / 255.0) ** inv_gamma) * 255 for i in np.arange(256)]).astype("uint8")
+        corrected = cv2.LUT(img_uint8, table)
+        return corrected.astype(np.float32) / 255.0 if was_float else corrected
+
     def apply_denoise(self, image: np.ndarray, method: str = 'gaussian',
                       sigma: Optional[float] = None,
                       kernel_size: Optional[int] = None) -> np.ndarray:
@@ -498,7 +531,8 @@ class ImagePreprocessor:
                          denoise_method: Optional[str] = None,
                          enhance_contrast: bool = False,
                          contrast_method: Optional[str] = None,
-                         normalize: bool = True) -> PreprocessingResult:
+                         normalize: bool = True,
+                         options: Optional[Dict[str, Any]] = None) -> PreprocessingResult:
         """
         Ana ön işleme fonksiyonu. Tüm adımları sırayla uygular.
         
@@ -540,12 +574,33 @@ class ImagePreprocessor:
                     "warning"
                 ))
             
+            options = options or {}
+            already_preprocessed = bool(options.get('already_preprocessed', False))
+            gamma_enabled = bool(options.get('apply_gamma', self.apply_gamma)) and not already_preprocessed
+            clahe_enabled = bool(options.get('apply_clahe', enhance_contrast or self.apply_clahe)) and not already_preprocessed
+
             # 3. Yeniden boyutlandırma
             resize_applied = False
             if resize_width:
                 image, resize_applied = self.resize_image(image, width=resize_width)
             
-            # 4. Gürültü azaltma
+            # 4. Gamma tahmini ve düzeltme
+            gamma_estimated = float(options.get('gamma', self.estimate_gamma(image) if self.auto_gamma else self.gamma))
+            gamma_applied = False
+            if gamma_enabled:
+                image = self.apply_gamma_correction(image, gamma_estimated)
+                gamma_applied = True
+
+            # 5. CLAHE kontrast iyileştirme
+            contrast_enhanced = False
+            applied_contrast_method = 'none'
+            if clahe_enabled:
+                method = contrast_method or options.get('contrast_method', 'clahe')
+                image = self.enhance_contrast(image, method=method)
+                contrast_enhanced = method != 'none'
+                applied_contrast_method = method
+
+            # 6. Gürültü azaltma
             denoise_applied = False
             applied_denoise_method = 'none'
             if denoise:
@@ -554,16 +609,7 @@ class ImagePreprocessor:
                 denoise_applied = True
                 applied_denoise_method = method
             
-            # 5. Kontrast iyileştirme
-            contrast_enhanced = False
-            applied_contrast_method = 'none'
-            if enhance_contrast:
-                method = contrast_method or 'clahe'
-                image = self.enhance_contrast(image, method=method)
-                contrast_enhanced = True
-                applied_contrast_method = method
-            
-            # 6. Renk normalizasyonu
+            # 7. Renk normalizasyonu
             if normalize:
                 image = self.normalize_color_channels(image)
             
@@ -582,6 +628,10 @@ class ImagePreprocessor:
                 denoise_method=applied_denoise_method,
                 contrast_method=applied_contrast_method,
                 color_space='RGB',
+                gamma_estimated=gamma_estimated,
+                gamma_applied=gamma_applied,
+                clahe_applied=contrast_enhanced and applied_contrast_method == 'clahe',
+                already_preprocessed=True,
                 timestamp=datetime.now().isoformat(),
                 exif_info=exif_info,
                 warnings=warnings,
@@ -619,6 +669,10 @@ class ImagePreprocessor:
                     denoise_method="none",
                     contrast_method="none",
                     color_space="RGB",
+                    gamma_estimated=0.0,
+                    gamma_applied=False,
+                    clahe_applied=False,
+                    already_preprocessed=False,
                     timestamp=datetime.now().isoformat(),
                     exif_info={},
                     warnings=warnings,
@@ -626,6 +680,24 @@ class ImagePreprocessor:
                 ),
                 success=False
             )
+
+
+def preprocess(image: Union[str, bytes, np.ndarray, Image.Image],
+               options: Optional[Dict[str, Any]] = None,
+               config: Optional[Dict[str, Any]] = None) -> PreprocessingResult:
+    """Tek public merkezi ön işleme API'si: gamma tahmini/düzeltme -> CLAHE -> denoise."""
+    opts = options or {}
+    processor = ImagePreprocessor(config)
+    return processor.preprocess_image(
+        image_input=image,
+        resize_width=opts.get('resize_width'),
+        denoise=opts.get('denoise', True),
+        denoise_method=opts.get('denoise_method'),
+        enhance_contrast=opts.get('apply_clahe', opts.get('enhance_contrast', False)),
+        contrast_method=opts.get('contrast_method', 'clahe'),
+        normalize=opts.get('normalize', True),
+        options=opts,
+    )
 
 
 def preprocess_image(image: Union[str, bytes, np.ndarray, Image.Image],
@@ -651,7 +723,8 @@ def preprocess_image(image: Union[str, bytes, np.ndarray, Image.Image],
         image_input=image,
         resize_width=resize_width,
         denoise=denoise,
-        enhance_contrast=enhance_contrast
+        enhance_contrast=enhance_contrast,
+        options={"apply_clahe": enhance_contrast}
     )
     
     return result.image, result.metadata.to_dict()

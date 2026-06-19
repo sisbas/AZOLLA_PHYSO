@@ -11,6 +11,7 @@ from skimage.exposure import equalize_hist, rescale_intensity
 
 from .errors import format_error, ProcessingContext, PipelineStepError
 from .segmenter_interface import standardize_mask, density_map
+from .image_preprocessor import ImagePreprocessor
 
 @dataclass
 class SegQC:
@@ -45,6 +46,7 @@ class SegmentationModule:
         self.trex_weight = self.cfg.get('trex_weight', 0.3)
         self.exg_weight = self.cfg.get('exg_weight', 0.7)
         self.auto_gamma = self.cfg.get('auto_gamma', True)
+        self.preprocessor = ImagePreprocessor(config)
         self.fallback_strategies = self.cfg.get('fallback_strategies', True)
 
     def calculate_exg(self, img: np.ndarray) -> np.ndarray:
@@ -92,17 +94,8 @@ class SegmentationModule:
         }
 
     def estimate_gamma(self, img: np.ndarray) -> float:
-        """Otomatik gamma tahmini - histogram analizine göre."""
-        gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-        mean_val = np.mean(gray)
-        
-        # Eğer görüntü çok karanlıksa gamma < 1, çok aydınlıksa gamma > 1
-        if mean_val < 80:
-            return 0.8  # Parlaklığı artır
-        elif mean_val > 180:
-            return 1.5  # Parlaklığı azalt
-        else:
-            return 1.2  # Normal düzeltme
+        """Merkezi ön işleme modülündeki gamma tahminini kullanır."""
+        return self.preprocessor.estimate_gamma(img)
 
     def auto_adjust_hsv(self, hsv: np.ndarray, mask_initial: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """Otomatik HSV threshold optimizasyonu - kullanıcı müdahalesini minimize eder."""
@@ -126,10 +119,8 @@ class SegmentationModule:
         return self.hsv_min, self.hsv_max
 
     def apply_gamma_correction(self, img: np.ndarray, gamma: float = 1.2) -> np.ndarray:
-        """Gamma düzeltmesi ile ışık koşullarını dengeler."""
-        inv_gamma = 1.0 / gamma
-        table = np.array([((i / 255.0) ** inv_gamma) * 255 for i in np.arange(0, 256)]).astype("uint8")
-        return cv2.LUT(img, table)
+        """Merkezi ön işleme modülündeki gamma düzeltmesini kullanır."""
+        return self.preprocessor.apply_gamma_correction(img, gamma)
 
     def array_to_base64(self, arr: np.ndarray) -> str:
         """Convert numpy array to base64 string for JSON serialization."""
@@ -148,7 +139,7 @@ class SegmentationModule:
         _, buffer = cv2.imencode('.png', arr_colored)
         return base64.b64encode(buffer).decode('utf-8')
 
-    def process(self, img_clean: np.ndarray, context: ProcessingContext = None) -> Tuple[np.ndarray, SegQC, Dict[str, Any]]:
+    def process(self, img_clean: np.ndarray, context: ProcessingContext = None, preprocessing_metadata: Optional[Dict[str, Any]] = None) -> Tuple[np.ndarray, SegQC, Dict[str, Any]]:
         """
         Process image and return mask, QC metrics, and additional outputs for API response.
         Returns: (mask, qc, extra_outputs) where extra_outputs contains base64 encoded images and indices
@@ -177,12 +168,18 @@ class SegmentationModule:
             gray = cv2.cvtColor(img_uint8, cv2.COLOR_RGB2GRAY)
             contrast_score = float(np.std(gray))
             
-            # 1. Gamma correction for lighting normalization
-            if self.auto_gamma:
+            # 1. Gamma correction for lighting normalization; skip if central preprocessing already did it.
+            preprocessing_metadata = preprocessing_metadata or {}
+            already_preprocessed = bool(preprocessing_metadata.get("already_preprocessed") or preprocessing_metadata.get("gamma_applied"))
+            if already_preprocessed:
+                gamma = float(preprocessing_metadata.get("gamma_estimated", 0.0) or 0.0)
+                img_gamma = img_uint8
+            elif self.auto_gamma:
                 gamma = self.estimate_gamma(img_uint8)
                 img_gamma = self.apply_gamma_correction(img_uint8, gamma=gamma)
             else:
-                img_gamma = self.apply_gamma_correction(img_uint8, gamma=1.2)
+                gamma = 1.2
+                img_gamma = self.apply_gamma_correction(img_uint8, gamma=gamma)
             
             # 2. Calculate vegetation indices. img_gamma is RGB: channel 0=R, 1=G, 2=B.
             r = img_gamma[:, :, 0].astype(np.float32)
@@ -379,7 +376,12 @@ class SegmentationModule:
                     "withinExpectedRange": 0.0 <= coverage <= 100.0,
                 },
                 "methodUsed": method_used,
-                "contrastScore": contrast_score
+                "contrastScore": contrast_score,
+                "preprocessing": {
+                    "already_preprocessed": already_preprocessed,
+                    "gamma_estimated": gamma,
+                    "gamma_applied_in_segmentation": not already_preprocessed,
+                }
             }
             
             if coverage < 0.5:
