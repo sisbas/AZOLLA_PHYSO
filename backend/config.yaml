@@ -12,6 +12,11 @@ preprocessing:
   clahe_grid_size: [8, 8]
   normalize_channels: true
   preferred_denoise: 'gaussian'
+  apply_gamma: true
+  auto_gamma: true
+  gamma: 1.2
+  apply_clahe: true
+  denoise: true
 
 isolation:
   # HSV ranges for Azolla (optimized for fern fronds)

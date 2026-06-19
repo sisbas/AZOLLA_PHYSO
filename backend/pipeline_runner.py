@@ -19,7 +19,8 @@ from backend.core import (
     FrondSegmenterModule,
     DLFallbackModule,
     ValidationModule,
-    PhenotypingModule
+    PhenotypingModule,
+    preprocess
 )
 
 class AzollaPipeline:
@@ -103,9 +104,28 @@ class AzollaPipeline:
                     }
                 }
             
-            # 2. & 3. Segmentation & Optimization (now returns extra outputs)
+            # 2. Central preprocessing before segmentation/phenotyping
+            self.logger.debug("Running central preprocessing...")
+            prep_res = preprocess(
+                std_res.img_clean,
+                options={
+                    "apply_gamma": self.config.get("preprocessing", {}).get("apply_gamma", True),
+                    "apply_clahe": self.config.get("preprocessing", {}).get("apply_clahe", False),
+                    "denoise": self.config.get("preprocessing", {}).get("denoise", True),
+                    "denoise_method": self.config.get("preprocessing", {}).get("preferred_denoise"),
+                    "normalize": True,
+                },
+                config=self.config,
+            )
+            all_errors.extend(prep_res.metadata.errors)
+            all_errors.extend(prep_res.metadata.warnings)
+            preprocessed_img = prep_res.image
+            preprocessing_metadata = prep_res.metadata.to_dict()
+            capture_metadata["preprocessing"] = preprocessing_metadata
+
+            # 3. & 4. Segmentation & Optimization (now returns extra outputs)
             self.logger.debug("Running segmentation...")
-            raw_mask, seg_qc, segmentation_outputs = self.seg.process(std_res.img_clean)
+            raw_mask, seg_qc, segmentation_outputs = self.seg.process(preprocessed_img, preprocessing_metadata=preprocessing_metadata)
             all_errors.extend(seg_qc.errors)
             
             self.logger.debug("Running mask optimization...")
@@ -114,13 +134,13 @@ class AzollaPipeline:
             
             # 4. Feature Extraction
             self.logger.debug("Extracting features...")
-            feature_record = self.feat.process_frame(std_res.img_clean, opt_mask, timestamp)
+            feature_record = self.feat.process_frame(preprocessed_img, opt_mask, timestamp)
             all_errors.extend(feature_record.errors)
             
             # 5. Fenotipleme ve Biyokütle Tahmini (YENİ)
             self.logger.debug("Running phenotyping...")
             phenotype_metrics = self.pheno.process(
-                img_rgb,
+                preprocessed_img,
                 opt_mask,
                 previous_results=previous_results,
                 time_diff_days=time_diff_days

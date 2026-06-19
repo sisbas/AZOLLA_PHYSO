@@ -13,6 +13,7 @@ import numpy as np
 from backend.logger import get_logger
 from backend.core.phenotyping import PhenotypingModule
 from backend.core.segmenter_interface import DefaultSegmenter
+from backend.core.image_preprocessor import preprocess
 
 logger = get_logger("phenotyping")
 
@@ -308,19 +309,36 @@ class AzollaPhenotypingService:
         try:
             logger.info(f"Starting analysis for image with shape {image.shape}, pool_area: {pool_area_m2} m²")
 
-            step1 = self._gamma_correction(image)
-            step2 = self._gray_world_white_balance(step1)
-            step3 = self._reduce_reflection(step2)
-            preprocessed = self._sharpen(step3)
-            # Service preprocessing uses OpenCV BGR; downstream segmentation/phenotyping indexes expect RGB (0=R, 1=G, 2=B).
-            rgb = cv2.cvtColor(preprocessed, cv2.COLOR_BGR2RGB)
+            # Service input uses OpenCV BGR; central preprocessing expects RGB and returns RGB.
+            input_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            prep_res = preprocess(
+                input_rgb,
+                options={
+                    "apply_gamma": True,
+                    "gamma": self.config.gamma,
+                    "apply_clahe": True,
+                    "denoise": True,
+                    "denoise_method": "gaussian",
+                    "normalize": False,
+                },
+                config={
+                    "preprocessing": {
+                        "gamma": self.config.gamma,
+                        "auto_gamma": False,
+                        "apply_gamma": True,
+                        "apply_clahe": True,
+                        "preferred_denoise": "gaussian",
+                    }
+                },
+            )
+            rgb = prep_res.image
             manual_mask = self._resolve_manual_roi_mask(manual_roi=manual_roi, image_shape=image.shape)
             if manual_mask is not None:
                 binary_mask = manual_mask
                 mask = (binary_mask > 0).astype(np.uint8)
                 qc = type("ManualQC", (), {"coverage_pct": float(np.mean(mask > 0) * 100.0), "quality_score": 1.0, "warnings": []})()
             else:
-                mask, qc, _ = self.segmenter.process(rgb)
+                mask, qc, _ = self.segmenter.process(rgb, preprocessing_metadata=prep_res.metadata.to_dict())
                 binary_mask = np.where(mask > 0, 255, 0).astype(np.uint8)
             isolated_rgb = cv2.bitwise_and(rgb, rgb, mask=binary_mask)
             isolated_gray = cv2.cvtColor(isolated_rgb, cv2.COLOR_RGB2GRAY)
@@ -386,6 +404,7 @@ class AzollaPhenotypingService:
             result["segmentation_qc"] = {**qc_metrics, "pass": qc_pass, "fail_reasons": qc_fail_reasons}
             result["images"] = {
                 "preprocessed_rgb_png": self._png_base64(rgb),
+                "preprocessing_metadata": prep_res.metadata.to_dict(),
                 "binary_mask_png": self._png_base64(binary_mask),
                 "isolated_rgb_png": self._png_base64(isolated_rgb),
                 "overlay_png": self._png_base64(overlay_rgb),
