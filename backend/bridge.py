@@ -120,7 +120,11 @@ def main():
             print(json.dumps(create_error_response(
                 str(e),
                 "processing",
-                {"error_type": "ProcessingError", "filename": filename}
+                {
+                    "error_type": "ProcessingError",
+                    "filename": filename,
+                    "error": getattr(e, "payload", None),
+                }
             )))
             return
             

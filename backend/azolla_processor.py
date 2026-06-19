@@ -32,8 +32,11 @@ class AzollaMetrics:
     timestamp: str
 
 class ProcessingError(Exception):
-    """Custom exception for Azolla pipeline errors"""
-    pass
+    """Custom exception for Azolla pipeline errors with optional structured payload."""
+
+    def __init__(self, message: str, *, payload: Optional[Dict[str, Any]] = None):
+        super().__init__(message)
+        self.payload = payload
 
 class AzollaProcessor:
     def __init__(self, config: Optional[Dict[str, Any]] = None):
@@ -63,7 +66,7 @@ class AzollaProcessor:
             return load_image_input(image_input, color_space="BGR")
         except ImageInputError as e:
             logger.error(f"Validation error: {str(e)}")
-            raise ProcessingError(f"Yükleme hatası: {str(e)}") from e
+            raise ProcessingError(f"Yükleme hatası: {str(e)}", payload=e.payload) from e
         except Exception as e:
             logger.error(f"Validation error: {str(e)}")
             raise ProcessingError(f"Yükleme hatası: {str(e)}") from e
