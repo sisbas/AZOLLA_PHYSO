@@ -1198,7 +1198,7 @@ const buildSummaryReport = (timeline: any[]): SummaryReport => {
   const reliableFrames = sourceFrames.filter((frame) => frame.metrics?.is_reliable !== false && frame.metrics?.plausible !== false);
   const reliableRatio = sourceFrames.length ? reliableFrames.length / sourceFrames.length : 0;
   const avgRiskScore = reliableFrames.length
-    ? average(reliableFrames.map((frame, idx) => computeCompositeRiskScore(reliableFrames, frame, idx, { level: 'good' }).score))
+    ? average(reliableFrames.map((frame, idx) => computeCompositeRiskScore(reliableFrames, frame, idx, { level: 'reliable' }).score))
     : null;
 
   if (reliableRatio >= SUMMARY_RULE_ENGINE.combinedRule.qcReliableRatioMin && avgRiskScore !== null && avgRiskScore >= SUMMARY_RULE_ENGINE.combinedRule.riskScoreMin) {

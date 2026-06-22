@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional, Union
 from PIL import Image
 from PIL.ExifTags import TAGS
 from core.image_input import ImageInputError, load_image_input
+from core.image_preprocessor import ImagePreprocessor
 from core.phenotyping import PhenotypingModule
 from core.segmenter_interface import calculate_mask_qc
 
@@ -62,6 +63,7 @@ class AzollaProcessor:
 
         phenotyping_config = config.get("phenotyping", {}) if config else {}
         self.phenotyping = PhenotypingModule({"phenotyping": phenotyping_config})
+        self.image_preprocessor = ImagePreprocessor(config or {})
 
     def load_and_validate(self, image_input: Any) -> np.ndarray:
         """Load image input via the shared adapter and return service-standard BGR."""
@@ -288,6 +290,19 @@ class AzollaProcessor:
 
         # 1. Load & Validate
         image = self.load_and_validate(image_input)
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        detected_lighting = self.image_preprocessor.detect_lighting_issues(image_rgb)
+        lighting_qc = {
+            key: detected_lighting[key]
+            for key in (
+                "mean_brightness",
+                "brightness_std",
+                "is_low_contrast",
+                "is_dark",
+                "is_bright",
+                "recommendation",
+            )
+        }
         original_copy = image.copy()
         
         # 2. Isolate & Segment
@@ -308,6 +323,7 @@ class AzollaProcessor:
         
         # 3. Segmentation QC + Metrics Extraction
         qc = calculate_mask_qc(original_copy, mask)
+        qc["lighting"] = lighting_qc
         warnings.extend(self._build_qc_warnings(qc, image_path))
         qc["warnings"] = warnings
         metrics = self.extract_metrics(original_copy, mask, timestamp)

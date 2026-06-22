@@ -181,11 +181,12 @@ def main():
             return
         
         # Return structured response
+        qc = result.get("qc", {})
         response = {
             "status": "success",
             "metrics": result.get("metrics", {}),
             "phenotyping": result.get("phenotyping", {}),
-            "qc": result.get("qc", {}),
+            "qc": qc,
             "warnings": result.get("warnings", []),
             "processed_image": f"data:image/jpeg;base64,{processed_b64}",
             "mask_image": f"data:image/jpeg;base64,{mask_b64}",
@@ -196,7 +197,8 @@ def main():
                 "processing_time_ms": (datetime.now() - datetime.fromisoformat(context["start_time"])).total_seconds() * 1000,
                 "filename": filename,
                 "warnings": context.get("warnings", []),
-                "qc": result.get("qc", {})
+                "qc": qc,
+                "lighting": qc.get("lighting", {})
             }
         }
         
