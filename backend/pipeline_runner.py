@@ -166,6 +166,27 @@ class AzollaPipeline:
             self.logger.debug("Isolating biomass...")
             isolated = self.iso.isolate(img_rgb, opt_mask)
             
+            # Compile results - merge segmentation outputs with metrics. Keep score names
+            # single-source: phenotyping owns health_score/stress_score, while
+            # segmentation reports only segmentation_health_proxy.
+            metric_sources = {
+                "segmentation_qc": {k: v for k, v in seg_qc.__dict__.items() if k != 'errors'},
+                "optimization_qc": {k: v for k, v in opt_qc.__dict__.items() if k != 'errors'},
+                "frond_qc": {k: v for k, v in frond_qc.items() if k != 'errors'},
+                "pseudocolor": ps_metrics,
+                "features": {k: v for k, v in feature_record.__dict__.items() if k != 'errors'},
+            }
+            metric_key_owner: Dict[str, str] = {}
+            duplicate_metric_keys: Dict[str, List[str]] = {}
+            for source_name, source_metrics in metric_sources.items():
+                for metric_key in source_metrics:
+                    if metric_key in metric_key_owner:
+                        duplicate_metric_keys.setdefault(metric_key, [metric_key_owner[metric_key]]).append(source_name)
+                    else:
+                        metric_key_owner[metric_key] = source_name
+            if duplicate_metric_keys:
+                raise ValueError(f"Metric key collision during result merge: {duplicate_metric_keys}")
+
             # Compile results - merge segmentation outputs with metrics
             results = {
                 "timestamp": timestamp,
@@ -173,11 +194,11 @@ class AzollaPipeline:
                     "normalization_passed": std_res.normalization_passed,
                     "illumination_score": std_res.illumination_score,
                     "wb_shift": std_res.wb_shift,
-                    **{k: v for k, v in seg_qc.__dict__.items() if k != 'errors'},
-                    **{k: v for k, v in opt_qc.__dict__.items() if k != 'errors'},
-                    **{k: v for k, v in frond_qc.items() if k != 'errors'},
-                    **ps_metrics,
-                    **{k: v for k, v in feature_record.__dict__.items() if k != 'errors'}
+                    **metric_sources["segmentation_qc"],
+                    **metric_sources["optimization_qc"],
+                    **metric_sources["frond_qc"],
+                    **metric_sources["pseudocolor"],
+                    **metric_sources["features"]
                 },
                 "capture_metadata": capture_metadata,
                 "phenotyping": self.pheno.to_dict(phenotype_metrics),  # Fenotipleme sonuçları ekle

@@ -74,6 +74,15 @@ python3 -m pytest backend/tests azolla_stress_detection/tests
 - Fenotipleme çekirdeği `backend/core/phenotyping.py` içinde bulunur.
 - Bağımsız araştırma/ML paketi `azolla_stress_detection/src/` altında tutulur; örneğin `azolla_stress_detection/src/cv/pipeline.py`, `azolla_stress_detection/src/ml/predictor.py` ve `azolla_stress_detection/src/dashboard/app.py`.
 
+
+### Skorların tekil kaynağı ve anlamı
+
+- Merkezi fenotipleme skorları `backend/core/scoring.py` içindeki `compute_health_stress_scores(metrics, ...)` fonksiyonundan üretilir; segmentasyon modülü kendi TREx tabanlı ara değerini `segmentation_health_proxy` adıyla raporlar ve bu değer merkezi `health_score` ile karıştırılmamalıdır.
+- `stress_score = browning_percent × browning_weight + yellowing_percent × yellowing_weight + robust_distribution_score × distribution_weight` formülüyle 0-100 aralığında hesaplanır; varsayılan ağırlıklar sırasıyla 0.5, 0.3 ve 0.2'dir.
+- `health_score`, merkezi stres skorunun tersini AGI, SACI, chlorophyll index ve varsa `growth_rate_percent_day` sinyalleriyle birleştiren 0-100 aralıklı özet sağlık indeksidir.
+- AGI `(2×G - R - B) / (2×G + R + B)`, SACI `(G - B) / (G + B + 0.001)` ve chlorophyll index `G / (R + 0.01)` olarak hesaplanır; büyüme hızı `ln(A₂/A₁)/(t₂-t₁) × 100` formülünü kullanır.
+- Korelasyon ≠ nedensellik. Bu skorlar erken uyarı indeksidir, biyokimyasal validasyon gerektirir; laboratuvar doğrulaması olmadan kesin fizyolojik tanı olarak yorumlanmamalıdır.
+
 ## Konfigürasyon
 
 - Web uygulamasının ayarlar ekranı `config.json` dosyasını okur/yazar.
