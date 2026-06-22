@@ -12,6 +12,7 @@ from .validation import ValidationModule
 from .image_preprocessor import ImagePreprocessor, preprocess, preprocess_image, PreprocessingMetadata, PreprocessingResult
 from .azolla_isolator import AzollaIsolator, isolate_azolla, IsolationResult, SegmentationMetrics
 from .phenotyping import PhenotypingModule, PhenotypeMetrics
+from .scoring import EARLY_WARNING_NOTE, compute_health_stress_scores
 
 __all__ = [
     "StandardizationModule",
@@ -39,4 +40,6 @@ __all__ = [
     # Fenotipleme Modülü
     "PhenotypingModule",
     "PhenotypeMetrics",
+    "EARLY_WARNING_NOTE",
+    "compute_health_stress_scores",
 ]

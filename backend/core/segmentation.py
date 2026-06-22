@@ -51,7 +51,7 @@ class SegQC:
     exr_mean: float
     hsv_threshold_used: bool
     gr_ratio: float
-    health_score: float
+    segmentation_health_proxy: float
     contrast_score: float
     method_used: str
 
@@ -498,11 +498,11 @@ class SegmentationModule:
                 
                 # Health score based on TREx (lower TREx = healthier)
                 # TREx range is 0-255, healthy plants typically have TREx < 128
-                health_score = max(0, min(100, 100 - (trex_mean - 128) * 0.5))
+                segmentation_health_proxy = max(0, min(100, 100 - (trex_mean - 128) * 0.5))
             else:
                 trex_mean = exr_mean = 0.0
                 gr_ratio = 0.0
-                health_score = 0.0
+                segmentation_health_proxy = 0.0
             
             # 8. Generate visualization outputs
             mask_uint8 = standardize_mask((mask_combined * 255).astype(np.uint8))
@@ -550,7 +550,7 @@ class SegmentationModule:
             extra_outputs = {
                 "area": pixel_count,
                 "grRatio": gr_ratio,
-                "healthScore": health_score,
+                "segmentationHealthProxy": segmentation_health_proxy,
                 "maskUrl": self.array_to_base64(mask_uint8),
                 "resultUrl": self.array_to_base64(result),
                 "stressHeatmapUrl": self.array_to_base64(heatmap),
@@ -601,7 +601,7 @@ class SegmentationModule:
                 exr_mean=exr_mean,
                 hsv_threshold_used=hsv_threshold_used,
                 gr_ratio=gr_ratio,
-                health_score=health_score,
+                segmentation_health_proxy=segmentation_health_proxy,
                 contrast_score=contrast_score,
                 method_used=method_used
             )

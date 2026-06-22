@@ -19,6 +19,8 @@ import logging
 import json
 from pathlib import Path
 
+from .scoring import EARLY_WARNING_NOTE, compute_health_stress_scores
+
 @dataclass
 class PhenotypeMetrics:
     """Fenotipik ölçüm metrikleri"""
@@ -61,6 +63,12 @@ class PhenotypeMetrics:
     max_coverage_percent: float
     
     errors: List[Dict[str, Any]]
+
+    # Merkezi skor metadata'sı (geriye dönük uyumluluk için varsayılanlı)
+    health_score: float = 0.0
+    score_note: str = EARLY_WARNING_NOTE
+    score_inputs: Optional[Dict[str, Any]] = None
+    score_weights: Optional[Dict[str, Any]] = None
 
 
 class PhenotypingModule:
@@ -424,7 +432,7 @@ class PhenotypingModule:
             'alpha_ci': list(self.alpha_ci),
             'r_squared': self.r_squared,
             'reference': self.calibration_reference,
-            'note': 'Korelasyon ≠ nedensellik. Bu skor erken uyarı indeksidir; biyokimyasal validasyon gerektirir.',
+            'note': EARLY_WARNING_NOTE,
             'dataset_id': self.calibration_dataset_id,
             'calibration_date': self.calibration_date,
             'sample_count': self.calibration_sample_count,
@@ -570,13 +578,8 @@ class PhenotypingModule:
             saci_index = float(np.mean(saci[mask_bool])) if np.any(mask_bool) else 0.0
             chlorophyll_index = float(np.mean(chl[mask_bool])) if np.any(mask_bool) else 0.0
             
-            # 4. Stres indeksleri
+            # 4. Stres indeksleri için açık girdiler
             browning_pct, yellowing_pct, robust_dist_score = self.calculate_stress_indices(r, g, b, mask_bool)
-            stress_score = (
-                browning_pct * self.stress_thresholds['browning_weight'] +
-                yellowing_pct * self.stress_thresholds['yellowing_weight'] +
-                robust_dist_score * self.stress_thresholds['distribution_weight']
-            )
             
             # 5. Yoğunluk haritası
             density_dist = self.calculate_density_map(mask_bool)
@@ -597,6 +600,19 @@ class PhenotypingModule:
                 time_diff_days
             )
 
+            score_result = compute_health_stress_scores(
+                agi_index=agi_index,
+                saci_index=saci_index,
+                chlorophyll_index=chlorophyll_index,
+                browning_percent=browning_pct,
+                yellowing_percent=yellowing_pct,
+                growth_rate_percent_day=growth_params['growth_rate_percent_day'],
+                robust_distribution_score=robust_dist_score,
+                browning_weight=float(self.stress_thresholds['browning_weight']),
+                yellowing_weight=float(self.stress_thresholds['yellowing_weight']),
+                distribution_weight=float(self.stress_thresholds['distribution_weight']),
+            )
+
             def round_optional(value, digits: int = 2):
                 return None if value is None else round(value, digits)
             
@@ -612,7 +628,11 @@ class PhenotypingModule:
                 
                 stress_browning_percent=round(browning_pct, 2),
                 stress_yellowing_percent=round(yellowing_pct, 2),
-                stress_score=round(stress_score, 2),
+                stress_score=round(score_result['stress_score'], 2),
+                health_score=round(score_result['health_score'], 2),
+                score_note=score_result['score_note'],
+                score_inputs=score_result['score_inputs'],
+                score_weights=score_result['score_weights'],
                 
                 density_low_percent=round(density_dist['low'], 2),
                 density_medium_percent=round(density_dist['medium'], 2),
@@ -660,6 +680,10 @@ class PhenotypingModule:
                 stress_browning_percent=0.0,
                 stress_yellowing_percent=0.0,
                 stress_score=0.0,
+                health_score=0.0,
+                score_note=EARLY_WARNING_NOTE,
+                score_inputs={},
+                score_weights={},
                 density_low_percent=0.0,
                 density_medium_percent=0.0,
                 density_high_percent=0.0,
@@ -676,7 +700,7 @@ class PhenotypingModule:
                     'alpha_ci': list(self.alpha_ci),
                     'r_squared': self.r_squared,
                     'reference': self.calibration_reference,
-                    'note': 'Korelasyon ≠ nedensellik. Bu skor erken uyarı indeksidir; biyokimyasal validasyon gerektirir.'
+                    'note': EARLY_WARNING_NOTE
                 },
                 growth_rate_percent_day=None,
                 doubling_time_days=None,
@@ -701,7 +725,11 @@ class PhenotypingModule:
             'stres_analizi': {
                 'browning_percent': metrics.stress_browning_percent,
                 'yellowing_percent': metrics.stress_yellowing_percent,
-                'stress_score': metrics.stress_score
+                'stress_score': metrics.stress_score,
+                'health_score': metrics.health_score,
+                'score_note': metrics.score_note,
+                'score_inputs': metrics.score_inputs,
+                'score_weights': metrics.score_weights
             },
             'yogunluk_dagilimi': {
                 'low_percent': metrics.density_low_percent,
