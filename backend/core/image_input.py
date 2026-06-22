@@ -25,6 +25,28 @@ from .errors import ErrorCategory, ErrorSeverity, format_error
 
 ImageColorSpace = Literal["BGR", "RGB"]
 
+_BASE64_IMAGE_PREFIXES = (
+    "/9j/",  # JPEG
+    "iVBOR",  # PNG
+    "R0lGOD",  # GIF
+    "UklGR",  # WebP RIFF container
+    "Qk",  # BMP
+)
+_MAX_PATH_CANDIDATE_LENGTH = 512
+
+
+def _looks_like_base64_image_source(source_text: str) -> bool:
+    candidate = source_text.strip()
+    return (
+        (candidate.startswith("data:") and "," in candidate)
+        or candidate.startswith(_BASE64_IMAGE_PREFIXES)
+        or len(candidate) > _MAX_PATH_CANDIDATE_LENGTH
+    )
+
+
+def _decode_base64_image(source_text: str, color_space: ImageColorSpace) -> np.ndarray:
+    return _convert_color(_decode_encoded_bytes(_decode_base64(source_text), "base64"), "BGR", color_space)
+
 
 class ImageInputError(ValueError):
     """Input-normalization error compatible with the shared pipeline error payload."""
@@ -144,13 +166,32 @@ def load_image_input(
 
     if isinstance(source, (str, os.PathLike)):
         source_text = os.fspath(source)
+        if _looks_like_base64_image_source(source_text):
+            return _decode_base64_image(source_text, color_space)
+
         path = Path(source_text)
-        if path.exists():
+        try:
+            path_exists = path.exists()
+        except OSError as exc:
+            try:
+                return _decode_base64_image(source_text, color_space)
+            except ImageInputError as decode_exc:
+                raise ImageInputError(
+                    f"Görüntü yolu kontrol edilemedi: {exc}",
+                    details={
+                        "source_type": "path",
+                        "path": source_text,
+                        "error_type": type(exc).__name__,
+                        "base64_error": str(decode_exc),
+                    },
+                ) from exc
+
+        if path_exists:
             image = cv2.imread(str(path), cv2.IMREAD_COLOR)
             if image is None:
                 raise ImageInputError("Görüntü dosyası okunamadı veya format geçersiz.", details={"path": str(path)})
             return _convert_color(image, "BGR", color_space)
-        return _convert_color(_decode_encoded_bytes(_decode_base64(source_text), "base64"), "BGR", color_space)
+        return _decode_base64_image(source_text, color_space)
 
     if hasattr(source, "read") or hasattr(source, "file"):
         data = _read_upload_or_file(source)
