@@ -45,6 +45,12 @@ segmentation:
   min_area: 150
   close_radius: 2
   threshold_tolerance: 2.0
+  min_component_area: 150
+  max_component_area_ratio: 0.65
+  max_edge_touch_ratio: 0.2
+  min_component_solidity: 0.35
+  min_component_compactness: 0.02
+  keep_largest_n: 10
   # HSV ranges for fern fronds (Azolla optimized)
   hsv_min: [35, 40, 40]
   hsv_max: [85, 255, 255]

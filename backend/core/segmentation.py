@@ -48,6 +48,12 @@ class SegmentationModule:
         self.auto_gamma = self.cfg.get('auto_gamma', True)
         self.preprocessor = ImagePreprocessor(config)
         self.fallback_strategies = self.cfg.get('fallback_strategies', True)
+        self.min_component_area = int(self.cfg.get('min_component_area', self.min_area))
+        self.max_component_area_ratio = float(self.cfg.get('max_component_area_ratio', 1.0))
+        self.max_edge_touch_ratio = float(self.cfg.get('max_edge_touch_ratio', 0.2))
+        self.min_component_solidity = float(self.cfg.get('min_component_solidity', 0.35))
+        self.min_component_compactness = float(self.cfg.get('min_component_compactness', 0.02))
+        self.keep_largest_n = self.cfg.get('keep_largest_n', 10)
 
     def calculate_exg(self, img: np.ndarray) -> np.ndarray:
         """ExG = 2G - R - B (normalized)."""
@@ -138,6 +144,125 @@ class SegmentationModule:
             
         _, buffer = cv2.imencode('.png', arr_colored)
         return base64.b64encode(buffer).decode('utf-8')
+
+
+    def filter_components(self, mask: np.ndarray) -> Tuple[np.ndarray, Dict[str, Any]]:
+        """Filter connected components before ROI-level measurements are computed.
+
+        Components are accepted/rejected using configurable geometric criteria so
+        mask cleaning is part of the actual ROI optimization path, not only a
+        reporting artifact. The input may be boolean or 0/255 uint8; the returned
+        mask is boolean.
+        """
+        mask_bool = mask.astype(bool)
+        h, w = mask_bool.shape[:2]
+        image_area = max(1, h * w)
+        min_area = max(0, int(self.min_component_area))
+        max_area = max(1, int(float(self.max_component_area_ratio) * image_area))
+        keep_largest_n = self.keep_largest_n
+        if keep_largest_n is not None:
+            keep_largest_n = max(0, int(keep_largest_n))
+
+        filtering_report: Dict[str, Any] = {
+            "inputComponents": 0,
+            "keptComponents": 0,
+            "discardedComponents": 0,
+            "discardedByReason": {},
+            "criteria": {
+                "minComponentArea": min_area,
+                "maxComponentAreaRatio": self.max_component_area_ratio,
+                "maxEdgeTouchRatio": self.max_edge_touch_ratio,
+                "minComponentSolidity": self.min_component_solidity,
+                "minComponentCompactness": self.min_component_compactness,
+                "keepLargestN": keep_largest_n,
+            },
+            "components": [],
+        }
+
+        if not np.any(mask_bool):
+            return mask_bool, filtering_report
+
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask_bool.astype(np.uint8), 8)
+        candidates = []
+
+        def add_reason(reason: str) -> None:
+            filtering_report["discardedByReason"][reason] = filtering_report["discardedByReason"].get(reason, 0) + 1
+
+        border_mask = np.zeros((h, w), dtype=bool)
+        border_mask[0, :] = True
+        border_mask[-1, :] = True
+        border_mask[:, 0] = True
+        border_mask[:, -1] = True
+
+        for label_id in range(1, num_labels):
+            component_mask = labels == label_id
+            area = int(stats[label_id, cv2.CC_STAT_AREA])
+            filtering_report["inputComponents"] += 1
+
+            contours, _ = cv2.findContours(component_mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            perimeter = float(sum(cv2.arcLength(contour, True) for contour in contours))
+            compactness = float((4.0 * np.pi * area) / (perimeter * perimeter + 1e-6)) if perimeter > 0 else 0.0
+
+            contour_points = np.vstack(contours) if contours else np.empty((0, 1, 2), dtype=np.int32)
+            convex_area = float(cv2.contourArea(cv2.convexHull(contour_points))) if len(contour_points) >= 3 else float(area)
+            solidity = float(area / (convex_area + 1e-6)) if convex_area > 0 else 0.0
+            edge_touch_ratio = float(np.count_nonzero(component_mask & border_mask) / max(1, area))
+
+            reasons = []
+            if area < min_area:
+                reasons.append("min_component_area")
+            if area > max_area:
+                reasons.append("max_component_area_ratio")
+            if edge_touch_ratio > self.max_edge_touch_ratio:
+                reasons.append("max_edge_touch_ratio")
+            if solidity < self.min_component_solidity:
+                reasons.append("min_component_solidity")
+            if compactness < self.min_component_compactness:
+                reasons.append("min_component_compactness")
+
+            component_info = {
+                "label": int(label_id),
+                "area": area,
+                "areaRatio": float(area / image_area),
+                "edgeTouchRatio": round(edge_touch_ratio, 6),
+                "solidity": round(solidity, 6),
+                "compactness": round(compactness, 6),
+                "kept": not reasons,
+                "reasons": reasons,
+            }
+            filtering_report["components"].append(component_info)
+
+            if reasons:
+                for reason in reasons:
+                    add_reason(reason)
+            else:
+                candidates.append((area, label_id))
+
+        if keep_largest_n is not None and keep_largest_n > 0:
+            kept_label_ids = {label_id for _, label_id in sorted(candidates, reverse=True)[:keep_largest_n]}
+            for _, label_id in sorted(candidates, reverse=True)[keep_largest_n:]:
+                add_reason("keep_largest_n")
+                for component in filtering_report["components"]:
+                    if component["label"] == label_id:
+                        component["kept"] = False
+                        component["reasons"].append("keep_largest_n")
+                        break
+        elif keep_largest_n == 0:
+            kept_label_ids = set()
+            for _, label_id in candidates:
+                add_reason("keep_largest_n")
+                for component in filtering_report["components"]:
+                    if component["label"] == label_id:
+                        component["kept"] = False
+                        component["reasons"].append("keep_largest_n")
+                        break
+        else:
+            kept_label_ids = {label_id for _, label_id in candidates}
+
+        filtered_mask = np.isin(labels, list(kept_label_ids))
+        filtering_report["keptComponents"] = len(kept_label_ids)
+        filtering_report["discardedComponents"] = filtering_report["inputComponents"] - filtering_report["keptComponents"]
+        return filtered_mask, filtering_report
 
     def process(self, img_clean: np.ndarray, context: ProcessingContext = None, preprocessing_metadata: Optional[Dict[str, Any]] = None) -> Tuple[np.ndarray, SegQC, Dict[str, Any]]:
         """
@@ -291,6 +416,9 @@ class SegmentationModule:
             if np.sum(mask_combined) > 0:
                 mask_combined = binary_closing(mask_combined, disk(self.close_radius))
                 mask_combined = remove_small_objects(mask_combined, min_size=self.min_area)
+
+            # Component filtering is applied before any ROI statistics/reporting.
+            mask_combined, component_filtering = self.filter_components(mask_combined)
             
             # 7. Calculate statistics on segmented region
             coverage = np.mean(mask_combined) * 100
@@ -364,6 +492,7 @@ class SegmentationModule:
                 "exrUrl": self.array_to_base64(indices['ExR']),
                 "trexUrl": self.array_to_base64(indices['TREx']),
                 "regions": regions,
+                "componentFiltering": component_filtering,
                 "images": {
                     "segmentasyon_maskesi": "data:image/png;base64," + self.array_to_base64(mask_uint8),
                     "yogunluk_haritasi": "data:image/png;base64," + self.array_to_base64(density_img),
