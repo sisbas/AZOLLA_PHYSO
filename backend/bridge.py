@@ -112,6 +112,7 @@ def main():
             logger.info("AzollaProcessor initialized")
             
             result = processor.run_pipeline(image, image_path=filename, pool_area_m2=pool_area_m2)
+            context["warnings"].extend(result.get("warnings", []))
             logger.info("Pipeline completed successfully")
             
         except ProcessingError as e:
@@ -184,6 +185,7 @@ def main():
             "status": "success",
             "metrics": result.get("metrics", {}),
             "phenotyping": result.get("phenotyping", {}),
+            "qc": result.get("qc", {}),
             "processed_image": f"data:image/jpeg;base64,{processed_b64}",
             "mask_image": f"data:image/jpeg;base64,{mask_b64}",
             "isolated_image": f"data:image/jpeg;base64,{isolated_b64}",
@@ -192,7 +194,8 @@ def main():
             "context": {
                 "processing_time_ms": (datetime.now() - datetime.fromisoformat(context["start_time"])).total_seconds() * 1000,
                 "filename": filename,
-                "warnings": context.get("warnings", [])
+                "warnings": context.get("warnings", []),
+                "qc": result.get("qc", {})
             }
         }
         

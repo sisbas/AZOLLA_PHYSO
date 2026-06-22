@@ -17,6 +17,7 @@ from PIL import Image
 from PIL.ExifTags import TAGS
 from core.image_input import ImageInputError, load_image_input
 from core.phenotyping import PhenotypingModule
+from core.segmenter_interface import calculate_mask_qc
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -52,7 +53,9 @@ class AzollaProcessor:
             "clahe_clip_limit": 2.0,
             "clahe_grid_size": (8, 8),
             "overlay_opacity": 0.6,
-            "min_confidence_threshold": 0.1
+            "min_confidence_threshold": 0.1,
+            "qc_min_coverage_pct": 0.5,
+            "qc_min_contrast_score": 5.0
         }
         if config:
             self.config.update(config)
@@ -190,6 +193,38 @@ class AzollaProcessor:
             timestamp=timestamp
         )
 
+    def _build_qc_warnings(self, qc: Dict[str, Any], image_path: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Generate per-file warnings from segmentation QC thresholds."""
+        filename = image_path or "unknown"
+        warnings: List[Dict[str, Any]] = []
+        min_contrast = float(self.config.get("qc_min_contrast_score", 5.0))
+        min_coverage = float(self.config.get("qc_min_coverage_pct", self.config.get("min_confidence_threshold", 0.1) * 100.0))
+
+        contrast_score = float(qc.get("contrast_score", 0.0) or 0.0)
+        coverage_pct = float(qc.get("coverage_pct", 0.0) or 0.0)
+
+        if contrast_score < min_contrast:
+            warnings.append({
+                "filename": filename,
+                "code": "LOW_CONTRAST",
+                "message": f"Low image contrast for {filename}: contrast_score={contrast_score:.2f} < {min_contrast:.2f}",
+                "metric": "contrast_score",
+                "value": contrast_score,
+                "threshold": min_contrast,
+            })
+
+        if coverage_pct < min_coverage:
+            warnings.append({
+                "filename": filename,
+                "code": "LOW_SAMPLE_DENSITY",
+                "message": f"Low sample density for {filename}: coverage_pct={coverage_pct:.2f}% < {min_coverage:.2f}%",
+                "metric": "coverage_pct",
+                "value": coverage_pct,
+                "threshold": min_coverage,
+            })
+
+        return warnings
+
     def add_timestamp_overlay(self, image: np.ndarray, metrics: AzollaMetrics) -> np.ndarray:
         """
         Add semi-transparent info box to bottom right.
@@ -262,7 +297,9 @@ class AzollaProcessor:
             # Fallback or warning
             logger.warning("Low confidence in segmentation.")
         
-        # 3. Metrics Extraction
+        # 3. Segmentation QC + Metrics Extraction
+        qc = calculate_mask_qc(original_copy, mask)
+        warnings = self._build_qc_warnings(qc, image_path)
         metrics = self.extract_metrics(original_copy, mask, timestamp)
         
         # 4. White Balance
@@ -287,7 +324,9 @@ class AzollaProcessor:
             "isolated_image": isolated_image,
             "mask": mask,
             "timestamp": metrics.timestamp,
-            "confidence_score": metrics.confidence_score
+            "confidence_score": metrics.confidence_score,
+            "qc": qc,
+            "warnings": warnings
         }
 
 # Main integration entry point
