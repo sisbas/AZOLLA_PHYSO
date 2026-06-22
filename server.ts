@@ -85,6 +85,44 @@ const normalizeTimestamp = (timestamp?: string): string | undefined => {
 const deterministicTimestampForIndex = (index: number) =>
   toIsoTimestamp(new Date(Date.UTC(2000, 0, 1, 0, 0, index)));
 
+const summarizeErrorMessage = (value: unknown): string => {
+  if (typeof value === "string") return value.trim();
+  if (value && typeof value === "object") {
+    const candidate = (value as any).message || (value as any).error || (value as any).details;
+    if (typeof candidate === "string") return candidate.trim();
+  }
+  return "Bilinmeyen işleme hatası";
+};
+
+const compactErrorMessage = (value: unknown, maxLength = 180): string => {
+  const message = summarizeErrorMessage(value).replace(/\s+/g, " ");
+  return message.length > maxLength ? `${message.slice(0, maxLength - 1)}…` : message;
+};
+
+const normalizeProcessingError = (error: any, filename: string, timestamp: string) => {
+  const details = error?.details && typeof error.details === "object" ? error.details : undefined;
+  const remediation = typeof error?.remediation === "string" ? error.remediation : undefined;
+
+  return {
+    filename,
+    error: compactErrorMessage(error?.message || error),
+    step: typeof error?.step === "string" ? error.step : details?.step,
+    details,
+    remediation,
+    timestamp,
+    stack: process.env.NODE_ENV === 'development' ? error?.stack : undefined,
+  };
+};
+
+const buildAllFilesFailedMessage = (errors: any[], total: number): string => {
+  const sample = errors
+    .slice(0, 2)
+    .map((entry) => `${entry.filename}: ${compactErrorMessage(entry.error || entry.message)}`)
+    .join("; ");
+
+  return `Hiçbir görüntü başarıyla işlenemedi (${total} dosya başarısız)${sample ? `: ${sample}` : "."}`;
+};
+
 const resolveSeriesTimestamps = (files: Express.Multer.File[], submitted: unknown): string[] => {
   const submittedTimestamps = Array.isArray(submitted)
     ? submitted.map(String)
@@ -429,7 +467,11 @@ async function runPythonPipeline(imageBuffer: Buffer, filename: string, poolArea
         const result = JSON.parse(output);
         if (result.status === "error") {
           logger.error(`Python processing error: ${result.message}`);
-          return reject(new Error(result.message));
+          const pipelineError = new Error(result.message || "Python pipeline failed") as Error & { step?: string; details?: any; remediation?: string };
+          pipelineError.step = result.step;
+          pipelineError.details = result.details;
+          pipelineError.remediation = result.remediation;
+          return reject(pipelineError);
         }
         logger.info(`Python pipeline completed for ${filename}`);
         resolve(result);
@@ -507,12 +549,8 @@ async function processImages(taskId: string, files: Express.Multer.File[], times
       logger.error(`Error processing file ${file.originalname}:`, err);
       
       // Add detailed error information
-      const errorInfo = {
-        filename: file.originalname,
-        error: err.message,
-        stack: process.env.NODE_ENV === 'development' ? err.stack : undefined,
-        timestamp: timestamps[i] || timestampFromFilename(file.originalname) || deterministicTimestampForIndex(i)
-      };
+      const failureTimestamp = timestamps[i] || timestampFromFilename(file.originalname) || deterministicTimestampForIndex(i);
+      const errorInfo = normalizeProcessingError(err, file.originalname, failureTimestamp);
       
       processingErrors.push(errorInfo);
       
@@ -532,7 +570,7 @@ async function processImages(taskId: string, files: Express.Multer.File[], times
   if (results.filter(r => r.status === "failed").length === total && total > 0) {
     tasks[taskId].status = "failed";
     tasks[taskId].stage = "failed";
-    tasks[taskId].error = `Hiçbir görüntü başarıyla işlenemedi (${total} dosya başarısız).`;
+    tasks[taskId].error = buildAllFilesFailedMessage(processingErrors, total);
     tasks[taskId].current_file = undefined;
     tasks[taskId].results = {
       experiment_id: experimentId,

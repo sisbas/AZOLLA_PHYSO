@@ -114,7 +114,7 @@ export default function UploadPanel({ onComplete }: UploadPanelProps) {
   const [progress, setProgress] = useState(0);
   const [pipelineStage, setPipelineStage] = useState<string>('queued');
   const [currentFile, setCurrentFile] = useState<string>('');
-  const [error, setError] = useState<{ message: string; remediation?: string } | null>(null);
+  const [error, setError] = useState<{ message: string; remediation?: string; fileErrors?: Array<{ filename?: string; error?: string; step?: string; details?: unknown; remediation?: string }> } | null>(null);
   const [actionState, setActionState] = useState<SegmentationActionState>('idle');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
@@ -267,9 +267,11 @@ export default function UploadPanel({ onComplete }: UploadPanelProps) {
             setToastMessage('Segmentasyon işlemi başarıyla tamamlandı.');
           } else if (statusData.status === 'failed') {
             clearInterval(poll);
+            const fileErrors = Array.isArray(statusData.results?.errors) ? statusData.results.errors : [];
             setError({
               message: statusData.error || 'Pipeline execution failed.',
-              remediation: 'Verify image contrast and sample density in the uploaded series.'
+              remediation: 'Verify image contrast and sample density in the uploaded series.',
+              fileErrors
             });
             setIsUploading(false);
             setActionState('error');
@@ -573,6 +575,18 @@ export default function UploadPanel({ onComplete }: UploadPanelProps) {
           <div className="flex flex-col gap-1">
             <p className="text-sm font-black uppercase tracking-tight">{error.message}</p>
             <p className="text-xs opacity-70 leading-relaxed italic">{error.remediation}</p>
+            {error.fileErrors && error.fileErrors.length > 0 && (
+              <ul className="mt-3 space-y-2 text-left text-xs">
+                {error.fileErrors.map((fileError, index) => (
+                  <li key={`${fileError.filename || 'file'}-${index}`} className="rounded-xl bg-white/70 p-3 text-rose-950 ring-1 ring-rose-100">
+                    <span className="font-black">{fileError.filename || `Dosya ${index + 1}`}</span>
+                    <span className="block opacity-80">{fileError.error || 'Bilinmeyen hata'}</span>
+                    {fileError.step && <span className="block opacity-60">Adım: {fileError.step}</span>}
+                    {fileError.remediation && <span className="block italic opacity-70">{fileError.remediation}</span>}
+                  </li>
+                ))}
+              </ul>
+            )}
             <button
               type="button"
               onClick={handleRetry}
