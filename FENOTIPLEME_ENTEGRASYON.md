@@ -115,6 +115,12 @@ Express fenotipleme endpoint'i tek görüntü için şu ana bölümleri döndür
 - `stres_analizi`
 - `yogunluk_dagilimi`
 - `doku_analizi`
+
+Kavramsal ayrım:
+
+- `renk_indeksleri`, yalnız renk/indeks dönüşümlerini kapsar. ExG, TREx, ExR gibi vejetasyon/stres indeksleri ile HSV ve LAB renk uzayı dönüşümleri bu kategoridedir.
+- `doku_analizi`, yalnız GLCM (Gray-Level Co-occurrence Matrix / Gri Seviye Eş-Oluşum Matrisi) doku metriklerini kapsar: `contrast`, `homogeneity`, `energy` ve `correlation`.
+- GLCM alanları geriye dönük uyumluluk için `renk_indeksleri` altında alias olarak döndürülmez; eski istemciler geçici olarak `doku_analizi` yoluna taşınmalıdır.
 - `biyokutle_tahmini`
 - `buyume_parametreleri`
 - `errors`

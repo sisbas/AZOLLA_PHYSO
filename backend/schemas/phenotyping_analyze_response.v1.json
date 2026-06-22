@@ -68,7 +68,8 @@
                     "type": "object"
                   },
                   "renk_indeksleri": {
-                    "type": "object"
+                    "type": "object",
+                    "description": "Renk/indeks dönüşümleri içindir (örn. ExG, TREx, ExR, HSV ve LAB tabanlı renk/indeks değerleri); GLCM doku metrikleri burada döndürülmez."
                   },
                   "stres_analizi": {
                     "type": "object"
@@ -104,7 +105,8 @@
                         ]
                       }
                     },
-                    "additionalProperties": true
+                    "additionalProperties": true,
+                    "description": "GLCM doku analizi metrikleri içindir (contrast, homogeneity, energy, correlation)."
                   },
                   "biyokutle_tahmini": {
                     "type": "object"
