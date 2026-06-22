@@ -514,19 +514,24 @@ async function processImages(taskId: string, files: Express.Multer.File[], times
       
       const pythonRes = await runPythonPipeline(file.buffer, file.originalname, poolAreaM2);
       
+      const qc = pythonRes.qc || pythonRes.context?.qc || {};
+      const warnings = pythonRes.context?.warnings || [];
+
       results.push({
         filename: file.originalname,
         timestamp: timestamps[i] || normalizeTimestamp(pythonRes.timestamp) || deterministicTimestampForIndex(i),
         status: "optimized",
         method: "AzollaProcessor-v1",
         errors: [],
+        warnings,
+        qc,
         metrics: {
-          coverage_pct: pythonRes.metrics?.area_ratio || 0,
+          coverage_pct: qc.coverage_pct ?? pythonRes.metrics?.area_ratio ?? 0,
           mean_stress_score: 1.0 - ((pythonRes.metrics?.g_ratio || 0) / 2.0),
           frond_count: Math.floor((pythonRes.metrics?.area_pixels || 0) / 400),
           early_stress_prob: (pythonRes.confidence || 0) < 0.5 ? 0.8 : 0.1,
           g_ratio: pythonRes.metrics?.g_ratio || 0,
-          pixels: pythonRes.metrics?.area_pixels || 0
+          pixels: qc.area_pixels ?? pythonRes.metrics?.area_pixels ?? 0
         },
         decision: {
           status: (pythonRes.metrics?.g_ratio || 0) < 1.2 ? "STRESSED" : "HEALTHY",

@@ -30,6 +30,52 @@ def standardize_mask(mask: np.ndarray, standards: SegmentationStandards | None =
     return mask_u8
 
 
+def mask_component_count(mask: np.ndarray) -> int:
+    """Count non-empty connected foreground components in a binary mask."""
+    mask_u8 = ((mask > 0).astype(np.uint8) * 255)
+    num_labels, _, stats, _ = cv2.connectedComponentsWithStats(mask_u8, connectivity=8)
+    return int(sum(1 for i in range(1, num_labels) if stats[i, cv2.CC_STAT_AREA] > 0))
+
+
+def calculate_mask_qc(
+    image: np.ndarray,
+    mask: np.ndarray,
+    *,
+    density_window: int = 64,
+) -> Dict[str, float | int]:
+    """Calculate shared segmentation QC metrics for a mask/image pair.
+
+    Reuses the project density-map buckets and the segmentation contrast
+    convention (grayscale standard deviation) so lightweight processors and the
+    full SegmentationModule report compatible QC values.
+    """
+    mask_u8 = standardize_mask(mask)
+    total_pixels = int(mask_u8.shape[0] * mask_u8.shape[1]) if mask_u8.size else 0
+    area_pixels = int(np.count_nonzero(mask_u8))
+    coverage_pct = float((area_pixels / total_pixels) * 100.0) if total_pixels else 0.0
+
+    if image is None or image.size == 0:
+        contrast_score = 0.0
+    elif image.ndim == 2:
+        contrast_score = float(np.std(image.astype(np.float32)))
+    else:
+        img_u8 = np.clip(image, 0, 255).astype(np.uint8)
+        gray = cv2.cvtColor(img_u8, cv2.COLOR_BGR2GRAY)
+        contrast_score = float(np.std(gray))
+
+    _, density_stats = density_map(mask_u8, window=density_window)
+
+    return {
+        "coverage_pct": coverage_pct,
+        "area_pixels": area_pixels,
+        "contrast_score": contrast_score,
+        "densityLowPct": float(density_stats["low"]),
+        "densityMediumPct": float(density_stats["medium"]),
+        "densityHighPct": float(density_stats["high"]),
+        "component_count": mask_component_count(mask_u8),
+    }
+
+
 def density_map(mask: np.ndarray, window: int = 64) -> Tuple[np.ndarray, Dict[str, float]]:
     h, w = mask.shape
     out = np.zeros((h, w, 3), dtype=np.uint8)
