@@ -8,6 +8,16 @@ export function QcSummaryPanel({ model }: { model: any }) {
   const { currentFrame, qcRows, qcHasDetailedData, qcSummary, qcStatusNotes, errorSeverityEntries, compositeRisk, qcConfidence, qcConfidenceInterval } = model;
   const confidencePct = typeof qcConfidence === 'number' ? Math.round(qcConfidence * 100) : null;
   const lowConfidence = typeof qcConfidence === 'number' && qcConfidence < 0.6;
+  const lighting = currentFrame?.qc?.lighting ?? currentFrame?.context?.lighting ?? currentFrame?.context?.qc?.lighting;
+  const lowContrastLighting = lighting?.is_low_contrast === true ? lighting : null;
+  const lightingRecommendations = Array.isArray(lowContrastLighting?.recommendation)
+    ? lowContrastLighting.recommendation.filter(Boolean)
+    : lowContrastLighting?.recommendation
+      ? [String(lowContrastLighting.recommendation)]
+      : [];
+  const lightingAdvice = lightingRecommendations.length > 0
+    ? lightingRecommendations.join(' · ')
+    : 'Kontrast/ışıklandırma yetersiz görünüyor; daha homojen ışıkta yeniden çekim veya CLAHE/kontrast iyileştirme önerilir.';
   const blendedLabel = (() => {
     const score = compositeRisk?.score;
     if (typeof score !== 'number') return qcSummary.label;
@@ -56,6 +66,13 @@ export function QcSummaryPanel({ model }: { model: any }) {
       {lowConfidence ? (
         <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs font-bold text-amber-800 mb-4">
           Düşük güven: Bu skorun belirsizliği yüksek, karar öncesi manuel QC doğrulaması önerilir.
+        </div>
+      ) : null}
+
+      {lowContrastLighting ? (
+        <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs font-bold text-amber-800 mb-4">
+          <span className="block text-amber-900">Düşük kontrast algılandı: {currentFrame?.filename ?? 'dosya adı yok'}</span>
+          <span className="block mt-1 font-semibold">{lightingAdvice}</span>
         </div>
       ) : null}
 

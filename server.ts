@@ -515,6 +515,10 @@ async function processImages(taskId: string, files: Express.Multer.File[], times
       const pythonRes = await runPythonPipeline(file.buffer, file.originalname, poolAreaM2);
       
       const qc = pythonRes.qc || pythonRes.context?.qc || {};
+      const lighting = qc.lighting || pythonRes.context?.lighting || pythonRes.context?.qc?.lighting || {};
+      if (Object.keys(lighting).length > 0) {
+        qc.lighting = lighting;
+      }
       const warnings = pythonRes.context?.warnings || pythonRes.qc?.warnings || pythonRes.warnings || [];
       const context = {
         ...(pythonRes.context || {}),
