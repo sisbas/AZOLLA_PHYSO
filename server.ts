@@ -515,7 +515,12 @@ async function processImages(taskId: string, files: Express.Multer.File[], times
       const pythonRes = await runPythonPipeline(file.buffer, file.originalname, poolAreaM2);
       
       const qc = pythonRes.qc || pythonRes.context?.qc || {};
-      const warnings = pythonRes.context?.warnings || [];
+      const warnings = pythonRes.context?.warnings || pythonRes.qc?.warnings || pythonRes.warnings || [];
+      const context = {
+        ...(pythonRes.context || {}),
+        warnings,
+        qc,
+      };
 
       results.push({
         filename: file.originalname,
@@ -545,7 +550,7 @@ async function processImages(taskId: string, files: Express.Multer.File[], times
           isolated: pythonRes.isolated_image || pythonRes.processed_image,
         },
         confidence: pythonRes.confidence || 0,
-        context: pythonRes.context || {}
+        context
       });
       
       logger.info(`Successfully processed ${file.originalname}`);

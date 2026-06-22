@@ -186,6 +186,7 @@ def main():
             "metrics": result.get("metrics", {}),
             "phenotyping": result.get("phenotyping", {}),
             "qc": result.get("qc", {}),
+            "warnings": result.get("warnings", []),
             "processed_image": f"data:image/jpeg;base64,{processed_b64}",
             "mask_image": f"data:image/jpeg;base64,{mask_b64}",
             "isolated_image": f"data:image/jpeg;base64,{isolated_b64}",

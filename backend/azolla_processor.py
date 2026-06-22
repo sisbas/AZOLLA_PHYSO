@@ -292,14 +292,24 @@ class AzollaProcessor:
         
         # 2. Isolate & Segment
         mask = self.isolate_and_segment(image)
+        warnings: List[Dict[str, Any]] = []
+        total_pixels = int(image.shape[0] * image.shape[1])
+        coverage_pct = (float(np.sum(mask > 0)) / total_pixels) * 100.0 if total_pixels else 0.0
+        min_confidence_threshold = float(self.config["min_confidence_threshold"])
         
         if np.sum(mask) / (image.shape[0] * image.shape[1]) < self.config["min_confidence_threshold"]:
-            # Fallback or warning
             logger.warning("Low confidence in segmentation.")
+            warnings.append({
+                "code": "low_sample_density",
+                "coverage_pct": coverage_pct,
+                "threshold": min_confidence_threshold,
+                "remediation": "Görüntüde daha fazla Azolla örneği olduğundan, çekim kadrajının havuzu/örneği yeterince kapsadığından ve ışık/kontrast koşullarının segmentasyona uygun olduğundan emin olun.",
+            })
         
         # 3. Segmentation QC + Metrics Extraction
         qc = calculate_mask_qc(original_copy, mask)
-        warnings = self._build_qc_warnings(qc, image_path)
+        warnings.extend(self._build_qc_warnings(qc, image_path))
+        qc["warnings"] = warnings
         metrics = self.extract_metrics(original_copy, mask, timestamp)
         
         # 4. White Balance
