@@ -141,6 +141,52 @@ FastAPI batch fenotipleme endpoint'i sürümlü zarf döndürür:
 }
 ```
 
+
+### `PhenotypeMetrics` yanıt sözleşmesi
+
+`PhenotypingModule.to_dict(metrics, language="tr" | "en", schema_version="1.0.0")` tek belgeli sözleşmeyi üretir. Varsayılan `language="tr"`, geriye dönük uyumluluk için mevcut Türkçe bölüm adlarını korur; her yanıtta aşağıdaki stabil İngilizce alanlar da üst seviyede garanti edilir: `agi`, `saci`, `chlorophyll_index`, `browning_percent`, `yellowing_percent`, `growth_rate_percent_day`, `health_score`, `stress_score`.
+
+Base64 görseller yalnız `images` nesnesinde standart anahtarlarla döner: `images.preprocessed_rgb_png`, `images.binary_mask_png`, `images.isolated_rgb_png`, `images.overlay_png`.
+
+Örnek:
+
+```json
+{
+  "schema_version": "1.0.0",
+  "agi": 0.65,
+  "saci": 0.42,
+  "chlorophyll_index": 1.85,
+  "browning_percent": 2.1,
+  "yellowing_percent": 1.8,
+  "growth_rate_percent_day": 12.5,
+  "health_score": 96.8,
+  "stress_score": 3.2,
+  "segmentasyon": {
+    "azolla_area_pixels": 1245678,
+    "azolla_area_m2": 12.46,
+    "coverage_percent": 78.3,
+    "water_surface_percent": 21.7
+  },
+  "renk_indeksleri": {
+    "agi_index": 0.65,
+    "saci_index": 0.42,
+    "chlorophyll_index": 1.85
+  },
+  "stres_analizi": {
+    "browning_percent": 2.1,
+    "yellowing_percent": 1.8,
+    "stress_score": 3.2,
+    "health_score": 96.8
+  },
+  "images": {
+    "preprocessed_rgb_png": "data:image/png;base64,...",
+    "binary_mask_png": "data:image/png;base64,...",
+    "isolated_rgb_png": "data:image/png;base64,...",
+    "overlay_png": "data:image/png;base64,..."
+  }
+}
+```
+
 ## Notlar
 
 - Biyokütle ve protein tahminleri kalibrasyon varsayımlarına bağlıdır; deneysel tartım/validasyon verisiyle doğrulanmalıdır.

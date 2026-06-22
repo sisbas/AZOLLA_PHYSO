@@ -684,15 +684,92 @@ class PhenotypingModule:
                 errors=errors
             )
     
-    def to_dict(self, metrics: PhenotypeMetrics) -> Dict[str, Any]:
-        """PhenotypeMetrics nesnesini dictionary'e çevirir"""
+    def to_dict(
+        self,
+        metrics: PhenotypeMetrics,
+        language: str = "tr",
+        schema_version: str = "1.0.0",
+    ) -> Dict[str, Any]:
+        """Return the documented PhenotypeMetrics API contract.
+
+        ``language="tr"`` preserves the existing Turkish section names for backward
+        compatibility while also exposing stable English top-level metric keys.
+        ``language="en"`` returns the same canonical metrics grouped under English
+        section names. ``schema_version`` is emitted so clients can pin parsing logic.
+        """
+        if language not in {"tr", "en"}:
+            raise ValueError("language must be 'tr' or 'en'")
+
+        stable_metrics = {
+            'agi': metrics.agi_index,
+            'saci': metrics.saci_index,
+            'chlorophyll_index': metrics.chlorophyll_index,
+            'browning_percent': metrics.stress_browning_percent,
+            'yellowing_percent': metrics.stress_yellowing_percent,
+            'growth_rate_percent_day': metrics.growth_rate_percent_day,
+            'health_score': max(0.0, min(100.0, 100.0 - float(metrics.stress_score or 0.0))),
+            'stress_score': metrics.stress_score,
+        }
+        segmentation = {
+            'azolla_area_pixels': metrics.azolla_area_pixels,
+            'azolla_area_m2': metrics.azolla_area_m2,
+            'coverage_percent': metrics.coverage_percent,
+            'water_surface_percent': metrics.water_surface_percent
+        }
+        color_indices = {
+            'agi': metrics.agi_index,
+            'saci': metrics.saci_index,
+            'chlorophyll_index': metrics.chlorophyll_index
+        }
+        stress_analysis = {
+            'browning_percent': metrics.stress_browning_percent,
+            'yellowing_percent': metrics.stress_yellowing_percent,
+            'stress_score': metrics.stress_score,
+            'health_score': stable_metrics['health_score']
+        }
+        density_distribution = {
+            'low_percent': metrics.density_low_percent,
+            'medium_percent': metrics.density_medium_percent,
+            'high_percent': metrics.density_high_percent
+        }
+        texture_analysis = {
+            'contrast': metrics.texture_contrast,
+            'homogeneity': metrics.texture_homogeneity,
+            'energy': metrics.texture_energy,
+            'correlation': metrics.texture_correlation
+        }
+        biomass_estimate = {
+            'fresh_biomass_g_m2': metrics.fresh_biomass_g_m2,
+            'dry_biomass_g_m2': metrics.dry_biomass_g_m2,
+            'protein_content_percent': metrics.protein_content_percent,
+            'calibration': metrics.biomass_calibration,
+            'confidence_score': metrics.biomass_calibration.get('confidence_score'),
+            'low_confidence_reason': metrics.biomass_calibration.get('low_confidence_reason')
+        }
+        growth_parameters = {
+            'growth_rate_percent_day': metrics.growth_rate_percent_day,
+            'doubling_time_days': metrics.doubling_time_days,
+            'max_coverage_percent': metrics.max_coverage_percent
+        }
+
+        if language == "en":
+            return {
+                'schema_version': schema_version,
+                **stable_metrics,
+                'segmentation': segmentation,
+                'color_indices': color_indices,
+                'stress_analysis': stress_analysis,
+                'density_distribution': density_distribution,
+                'texture_analysis': texture_analysis,
+                'biomass_estimate': biomass_estimate,
+                'growth_parameters': growth_parameters,
+                'errors': metrics.errors
+            }
+
         return {
-            'segmentasyon': {
-                'azolla_area_pixels': metrics.azolla_area_pixels,
-                'azolla_area_m2': metrics.azolla_area_m2,
-                'coverage_percent': metrics.coverage_percent,
-                'water_surface_percent': metrics.water_surface_percent
-            },
+            'schema_version': schema_version,
+            **stable_metrics,
+            'segmentasyon': segmentation,
             'renk_indeksleri': {
                 'agi_index': metrics.agi_index,
                 'saci_index': metrics.saci_index,
@@ -701,31 +778,12 @@ class PhenotypingModule:
             'stres_analizi': {
                 'browning_percent': metrics.stress_browning_percent,
                 'yellowing_percent': metrics.stress_yellowing_percent,
-                'stress_score': metrics.stress_score
+                'stress_score': metrics.stress_score,
+                'health_score': stable_metrics['health_score']
             },
-            'yogunluk_dagilimi': {
-                'low_percent': metrics.density_low_percent,
-                'medium_percent': metrics.density_medium_percent,
-                'high_percent': metrics.density_high_percent
-            },
-            'doku_analizi': {
-                'contrast': metrics.texture_contrast,
-                'homogeneity': metrics.texture_homogeneity,
-                'energy': metrics.texture_energy,
-                'correlation': metrics.texture_correlation
-            },
-            'biyokutle_tahmini': {
-                'fresh_biomass_g_m2': metrics.fresh_biomass_g_m2,
-                'dry_biomass_g_m2': metrics.dry_biomass_g_m2,
-                'protein_content_percent': metrics.protein_content_percent,
-                'calibration': metrics.biomass_calibration,
-                'confidence_score': metrics.biomass_calibration.get('confidence_score'),
-                'low_confidence_reason': metrics.biomass_calibration.get('low_confidence_reason')
-            },
-            'buyume_parametreleri': {
-                'growth_rate_percent_day': metrics.growth_rate_percent_day,
-                'doubling_time_days': metrics.doubling_time_days,
-                'max_coverage_percent': metrics.max_coverage_percent
-            },
+            'yogunluk_dagilimi': density_distribution,
+            'doku_analizi': texture_analysis,
+            'biyokutle_tahmini': biomass_estimate,
+            'buyume_parametreleri': growth_parameters,
             'errors': metrics.errors
         }

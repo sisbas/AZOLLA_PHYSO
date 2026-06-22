@@ -158,14 +158,14 @@ def main():
             if result is None or "processed_image" not in result or "mask" not in result:
                 raise ValueError("Pipeline did not return expected results")
             
-            _, buffer_processed = cv2.imencode(".jpg", result["processed_image"])
+            _, buffer_processed = cv2.imencode(".png", result["processed_image"])
             processed_b64 = base64.b64encode(buffer_processed).decode("utf-8")
             
-            _, buffer_mask = cv2.imencode(".jpg", result["mask"])
+            _, buffer_mask = cv2.imencode(".png", result["mask"])
             mask_b64 = base64.b64encode(buffer_mask).decode("utf-8")
 
             isolated_img = result.get("isolated_image", result["processed_image"])
-            _, buffer_isolated = cv2.imencode(".jpg", isolated_img)
+            _, buffer_isolated = cv2.imencode(".png", isolated_img)
             isolated_b64 = base64.b64encode(buffer_isolated).decode("utf-8")
             
             logger.info("Results encoded successfully")
@@ -184,9 +184,15 @@ def main():
             "status": "success",
             "metrics": result.get("metrics", {}),
             "phenotyping": result.get("phenotyping", {}),
-            "processed_image": f"data:image/jpeg;base64,{processed_b64}",
-            "mask_image": f"data:image/jpeg;base64,{mask_b64}",
-            "isolated_image": f"data:image/jpeg;base64,{isolated_b64}",
+            "images": {
+                "preprocessed_rgb_png": f"data:image/png;base64,{processed_b64}",
+                "binary_mask_png": f"data:image/png;base64,{mask_b64}",
+                "isolated_rgb_png": f"data:image/png;base64,{isolated_b64}",
+                "overlay_png": f"data:image/png;base64,{processed_b64}",
+            },
+            "processed_image": f"data:image/png;base64,{processed_b64}",
+            "mask_image": f"data:image/png;base64,{mask_b64}",
+            "isolated_image": f"data:image/png;base64,{isolated_b64}",
             "confidence": result.get("confidence_score", 0.0),
             "timestamp": result.get("timestamp", datetime.now().strftime('%Y-%m-%d %H:%M')),
             "context": {
