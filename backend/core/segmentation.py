@@ -5,13 +5,41 @@ import cv2
 import base64
 from typing import Dict, Any, Tuple, List, Optional
 from dataclasses import dataclass
-from skimage.filters import threshold_otsu, threshold_li
+from skimage.filters import threshold_otsu
 from skimage.morphology import binary_closing, disk, remove_small_objects, binary_opening
 from skimage.exposure import equalize_hist, rescale_intensity
 
 from .errors import format_error, ProcessingContext, PipelineStepError
 from .segmenter_interface import standardize_mask, density_map
 from .image_preprocessor import ImagePreprocessor
+
+
+def _mask_component_count(mask: np.ndarray) -> int:
+    mask_uint8 = standardize_mask((mask.astype(bool) * 255).astype(np.uint8))
+    num_labels, _, stats, _ = cv2.connectedComponentsWithStats(mask_uint8)
+    return int(sum(1 for i in range(1, num_labels) if stats[i, cv2.CC_STAT_AREA] > 0))
+
+
+def is_mask_valid(mask: np.ndarray, qc: Dict[str, Any]) -> bool:
+    """Validate a candidate segmentation mask using coverage, components, and contrast."""
+    if mask is None or mask.size == 0:
+        return False
+
+    coverage_pct = float(qc.get("coverage_pct", np.mean(mask.astype(bool)) * 100.0) or 0.0)
+    component_count = int(qc.get("component_count", _mask_component_count(mask)) or 0)
+    contrast_score = float(qc.get("contrast_score", 0.0) or 0.0)
+
+    min_coverage_pct = float(qc.get("min_coverage_pct", 0.5))
+    max_coverage_pct = float(qc.get("max_coverage_pct", 95.0))
+    min_components = int(qc.get("min_components", 1))
+    max_components = int(qc.get("max_components", 250))
+    min_contrast_score = float(qc.get("min_contrast_score", 5.0))
+
+    return (
+        min_coverage_pct <= coverage_pct <= max_coverage_pct
+        and min_components <= component_count <= max_components
+        and contrast_score >= min_contrast_score
+    )
 
 @dataclass
 class SegQC:
@@ -54,6 +82,13 @@ class SegmentationModule:
         self.min_component_solidity = float(self.cfg.get('min_component_solidity', 0.35))
         self.min_component_compactness = float(self.cfg.get('min_component_compactness', 0.02))
         self.keep_largest_n = self.cfg.get('keep_largest_n', 10)
+
+        self.strategy_policy = self.cfg.get('strategy_policy', 'coverage_union')
+        self.qc_min_coverage = float(self.cfg.get('qc_min_coverage', 0.5))
+        self.qc_max_coverage = float(self.cfg.get('qc_max_coverage', 95.0))
+        self.qc_min_components = int(self.cfg.get('qc_min_components', 1))
+        self.qc_max_components = int(self.cfg.get('qc_max_components', 250))
+        self.qc_min_contrast = float(self.cfg.get('qc_min_contrast', 5.0))
 
     def calculate_exg(self, img: np.ndarray) -> np.ndarray:
         """ExG = 2G - R - B (normalized)."""
@@ -317,98 +352,128 @@ class SegmentationModule:
             exr = self.calculate_exr(r, g, b)
             indices = self.calculate_indices(r, g, b)
             
-            # Initialize variables for tracking best method
+            # Initialize variables for tracking candidate methods
             best_mask = None
             best_coverage = 0.0
             method_used = "none"
-            
+            threshold_value = 0.0
+            fallback_reason = None
+            candidate_coverages: Dict[str, float] = {}
+            candidate_thresholds: Dict[str, float] = {}
+            candidate_masks: Dict[str, np.ndarray] = {}
+            candidate_validity: Dict[str, bool] = {}
+            hsv_threshold_used = False
+
+            def candidate_qc(candidate_mask: np.ndarray) -> Dict[str, Any]:
+                return {
+                    "coverage_pct": float(np.mean(candidate_mask.astype(bool)) * 100.0),
+                    "component_count": _mask_component_count(candidate_mask),
+                    "contrast_score": contrast_score,
+                    "min_coverage_pct": self.qc_min_coverage,
+                    "max_coverage_pct": self.qc_max_coverage,
+                    "min_components": self.qc_min_components,
+                    "max_components": self.qc_max_components,
+                    "min_contrast_score": self.qc_min_contrast,
+                }
+
+            def register_candidate(name: str, candidate_mask: np.ndarray, threshold: float) -> None:
+                candidate_masks[name] = candidate_mask.astype(bool)
+                candidate_thresholds[name] = float(threshold)
+                candidate_coverages[name] = float(np.mean(candidate_masks[name]) * 100.0)
+                candidate_validity[name] = is_mask_valid(candidate_masks[name], candidate_qc(candidate_masks[name]))
+
             # STRATEGY 1: Enhanced ExG + Otsu (primary)
             try:
                 thresh_exg = threshold_otsu(exg_enhanced)
                 mask_exg = exg_enhanced > thresh_exg
                 mask_exg = binary_opening(mask_exg, disk(2))
-                coverage_exg = np.mean(mask_exg) * 100
-                
-                if coverage_exg > best_coverage:
-                    best_mask = mask_exg.copy()
-                    best_coverage = coverage_exg
-                    method_used = "exg_otsu"
-                    thresh_exg_final = thresh_exg
+                register_candidate("exg_otsu", mask_exg, thresh_exg)
             except Exception as e:
                 logging.warning(f"ExG+Otsu failed: {str(e)}")
-                thresh_exg_final = 0.0
-            
+
             # STRATEGY 2: HSV-based segmentation with adaptive thresholds
             try:
                 hsv = cv2.cvtColor(img_gamma, cv2.COLOR_RGB2HSV)
-                
-                # Auto-adjust HSV thresholds based on initial mask
-                if self.adaptive_hsv and best_mask is not None:
-                    hsv_min, hsv_max = self.auto_adjust_hsv(hsv, best_mask.astype(np.uint8))
+                initial_mask = candidate_masks.get("exg_otsu")
+                if self.adaptive_hsv and initial_mask is not None:
+                    hsv_min, hsv_max = self.auto_adjust_hsv(hsv, initial_mask.astype(np.uint8))
                     hsv_threshold_used = True
                 else:
                     hsv_min, hsv_max = self.hsv_min, self.hsv_max
                     hsv_threshold_used = False
-                
-                mask_hsv = cv2.inRange(hsv, hsv_min, hsv_max)
-                mask_hsv = mask_hsv > 0
+
+                mask_hsv = cv2.inRange(hsv, hsv_min, hsv_max) > 0
                 mask_hsv = binary_opening(mask_hsv, disk(2))
-                coverage_hsv = np.mean(mask_hsv) * 100
-                
-                # Use HSV if it gives better coverage or complements ExG
-                if coverage_hsv > best_coverage * 1.2:  # %20 daha iyi ise
-                    best_mask = mask_hsv.copy()
-                    best_coverage = coverage_hsv
-                    method_used = "hsv_adaptive"
-                elif best_mask is not None:
-                    # Combine: union of both masks with some logic
-                    mask_combined = np.logical_or(best_mask, mask_hsv)
-                    coverage_combined = np.mean(mask_combined) * 100
-                    if coverage_combined > best_coverage * 1.1:
-                        best_mask = mask_combined
-                        best_coverage = coverage_combined
-                        method_used = "exg_hsv_combined"
+                register_candidate("hsv_adaptive" if hsv_threshold_used else "hsv", mask_hsv, float(hsv_min[0]))
             except Exception as e:
                 logging.warning(f"HSV segmentation failed: {str(e)}")
-            
-            # STRATEGY 3: Fallback - Simple green channel thresholding
-            if best_mask is None or best_coverage < 1.0:
-                try:
-                    # Normalize green channel
-                    g_norm = rescale_intensity(g, out_range=(0, 1))
-                    thresh_g = threshold_li(g_norm)
-                    mask_green = g_norm > (thresh_g * 0.8)  # Relaxed threshold
-                    mask_green = binary_opening(mask_green, disk(3))
-                    coverage_green = np.mean(mask_green) * 100
-                    
-                    if coverage_green > best_coverage:
-                        best_mask = mask_green
-                        best_coverage = coverage_green
-                        method_used = "green_channel_li"
-                        thresh_exg_final = thresh_g
-                except Exception as e:
-                    logging.warning(f"Green channel fallback failed: {str(e)}")
-            
-            # STRATEGY 4: Last resort - LAB color space a* channel
-            if best_mask is None or best_coverage < 1.0:
-                try:
-                    lab = cv2.cvtColor(img_gamma, cv2.COLOR_RGB2LAB)
-                    a_channel = lab[:,:,1].astype(np.float32)
-                    a_norm = rescale_intensity(a_channel, out_range=(0, 1))
-                    
-                    # Green vegetation typically has negative a* values in LAB
-                    mask_lab = a_norm < 0.5
-                    mask_lab = binary_opening(mask_lab, disk(3))
-                    coverage_lab = np.mean(mask_lab) * 100
-                    
-                    if coverage_lab > best_coverage:
-                        best_mask = mask_lab
-                        best_coverage = coverage_lab
-                        method_used = "lab_a_channel"
-                        thresh_exg_final = 0.5
-                except Exception as e:
-                    logging.warning(f"LAB fallback failed: {str(e)}")
-            
+
+            # STRATEGY 3: LAB color space a* channel fallback
+            try:
+                lab = cv2.cvtColor(img_gamma, cv2.COLOR_RGB2LAB)
+                a_channel = lab[:, :, 1].astype(np.float32)
+                a_norm = rescale_intensity(a_channel, out_range=(0, 1))
+                mask_lab = a_norm < 0.5
+                mask_lab = binary_opening(mask_lab, disk(3))
+                register_candidate("lab_a_channel", mask_lab, 0.5)
+            except Exception as e:
+                logging.warning(f"LAB fallback failed: {str(e)}")
+
+            if self.strategy_policy == "strict_fallback":
+                for candidate_name in ("exg_otsu", "hsv_adaptive", "hsv", "lab_a_channel"):
+                    if candidate_name not in candidate_masks:
+                        continue
+                    if candidate_validity.get(candidate_name, False):
+                        best_mask = candidate_masks[candidate_name]
+                        best_coverage = candidate_coverages[candidate_name]
+                        method_used = candidate_name
+                        threshold_value = candidate_thresholds[candidate_name]
+                        break
+                    fallback_reason = (
+                        f"{candidate_name} failed QC: "
+                        f"coverage={candidate_coverages.get(candidate_name, 0.0):.2f}%, "
+                        f"valid={candidate_validity.get(candidate_name, False)}"
+                    )
+
+                if best_mask is None and candidate_masks:
+                    method_used = "lab_a_channel" if "lab_a_channel" in candidate_masks else next(reversed(candidate_masks))
+                    best_mask = candidate_masks[method_used]
+                    best_coverage = candidate_coverages[method_used]
+                    threshold_value = candidate_thresholds[method_used]
+                    fallback_reason = fallback_reason or "No candidate passed QC; using last available fallback."
+            else:
+                # coverage_union policy preserves the previous behavior: choose coverage-improving
+                # candidates and union ExG+HSV when it improves coverage enough.
+                if "exg_otsu" in candidate_masks:
+                    best_mask = candidate_masks["exg_otsu"].copy()
+                    best_coverage = candidate_coverages["exg_otsu"]
+                    method_used = "exg_otsu"
+                    threshold_value = candidate_thresholds["exg_otsu"]
+
+                hsv_name = "hsv_adaptive" if "hsv_adaptive" in candidate_masks else "hsv"
+                if hsv_name in candidate_masks:
+                    coverage_hsv = candidate_coverages[hsv_name]
+                    if best_mask is None or coverage_hsv > best_coverage * 1.2:
+                        best_mask = candidate_masks[hsv_name].copy()
+                        best_coverage = coverage_hsv
+                        method_used = hsv_name
+                        threshold_value = candidate_thresholds[hsv_name]
+                    elif best_mask is not None:
+                        mask_union = np.logical_or(best_mask, candidate_masks[hsv_name])
+                        coverage_union = float(np.mean(mask_union) * 100.0)
+                        candidate_coverages["exg_hsv_combined"] = coverage_union
+                        if coverage_union > best_coverage * 1.1:
+                            best_mask = mask_union
+                            best_coverage = coverage_union
+                            method_used = "exg_hsv_combined"
+                            threshold_value = candidate_thresholds.get("exg_otsu", 0.0)
+
+                if (best_mask is None or best_coverage < 1.0) and "lab_a_channel" in candidate_masks:
+                    best_mask = candidate_masks["lab_a_channel"].copy()
+                    best_coverage = candidate_coverages["lab_a_channel"]
+                    method_used = "lab_a_channel"
+                    threshold_value = candidate_thresholds["lab_a_channel"]
+
             # Use the best mask found
             mask_combined = best_mask if best_mask is not None else np.zeros_like(gray, dtype=bool)
             
@@ -505,6 +570,9 @@ class SegmentationModule:
                     "withinExpectedRange": 0.0 <= coverage <= 100.0,
                 },
                 "methodUsed": method_used,
+                "threshold_value": float(threshold_value),
+                "fallback_reason": fallback_reason,
+                "candidate_coverages": candidate_coverages,
                 "contrastScore": contrast_score,
                 "preprocessing": {
                     "already_preprocessed": already_preprocessed,
@@ -526,12 +594,12 @@ class SegmentationModule:
 
             qc = SegQC(
                 coverage_pct=coverage,
-                threshold_value=float(thresh_exg_final) if 'thresh_exg_final' in locals() else 0.0,
+                threshold_value=float(threshold_value),
                 otsu_valid=coverage > 0.1,
                 errors=errors,
                 trex_mean=trex_mean,
                 exr_mean=exr_mean,
-                hsv_threshold_used=('hsv' in method_used),
+                hsv_threshold_used=hsv_threshold_used,
                 gr_ratio=gr_ratio,
                 health_score=health_score,
                 contrast_score=contrast_score,

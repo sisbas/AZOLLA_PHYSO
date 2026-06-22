@@ -51,6 +51,15 @@ segmentation:
   min_component_solidity: 0.35
   min_component_compactness: 0.02
   keep_largest_n: 10
+
+  # strict_fallback: ExG+Otsu -> HSV -> LAB a* based on QC validity.
+  # coverage_union: preserve historical coverage-improving union behavior.
+  strategy_policy: "coverage_union"
+  qc_min_coverage: 0.5
+  qc_max_coverage: 95.0
+  qc_min_components: 1
+  qc_max_components: 250
+  qc_min_contrast: 5.0
   # HSV ranges for fern fronds (Azolla optimized)
   hsv_min: [35, 40, 40]
   hsv_max: [85, 255, 255]
