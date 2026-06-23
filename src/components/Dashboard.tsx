@@ -630,6 +630,22 @@ const deriveCompareMetricValue = (
 ): { value: number | null; estimated?: boolean; tooltip?: string } => {
   if (!frame) return { value: null };
   const metrics = frame.metrics ?? {};
+  const phenotyping = frame.phenotyping ?? {};
+
+  const estimateStressRatio = () => {
+    const probability = getNumericValue(metrics.early_stress_prob ?? frame.decision?.early_stress_prob);
+    const stressScore = getNumericValue(metrics.mean_stress_score ?? phenotyping.stress_score);
+    const browning = getPhenotypingValue(phenotyping, 'stress_browning_percent');
+    const yellowing = getPhenotypingValue(phenotyping, 'stress_yellowing_percent');
+
+    if (probability === null && stressScore === null && browning === null && yellowing === null) return null;
+
+    const probabilitySignal = probability !== null ? clampValue(probability, 0, 1) : 0;
+    const scoreSignal = stressScore !== null ? clampValue(stressScore, 0, 10) / 10 : 0;
+    const browningSignal = browning !== null ? clampValue(browning, 0, 100) / 100 : 0;
+    const yellowingSignal = yellowing !== null ? clampValue(yellowing, 0, 100) / 100 : 0;
+    return clampValue((probabilitySignal * 0.55) + (scoreSignal * 0.25) + (browningSignal * 0.1) + (yellowingSignal * 0.1), 0, 1);
+  };
 
   if (key === 'rg_ratio') {
     const rgDirect = getNumericValue(metrics.rg_ratio);
@@ -640,11 +656,21 @@ const deriveCompareMetricValue = (
     if (meanR !== null && meanG !== null && Number.isFinite(meanR) && Number.isFinite(meanG) && meanG > 0) {
       return { value: clampValue(meanR / meanG, 0, 10), estimated: true, tooltip: 'R/G oranı mean_r / mean_g ile tahmin edildi.' };
     }
+
+    const chlorophyll = getPhenotypingValue(phenotyping, 'chlorophyll_index');
+    if (chlorophyll !== null && chlorophyll > 0) {
+      return { value: clampValue(1 / chlorophyll, 0, 10), estimated: true, tooltip: 'R/G oranı klorofil indeksinin tersiyle tahmin edildi.' };
+    }
+
+    const stressRatio = estimateStressRatio();
+    if (stressRatio !== null) {
+      return { value: clampValue(0.35 + stressRatio * 1.15, 0, 10), estimated: true, tooltip: 'R/G oranı stres sinyallerinden yaklaşık tahmin edildi.' };
+    }
     return { value: null };
   }
 
   if (key === 'chlorophyll_index') {
-    const chlorophyll = getPhenotypingValue(frame.phenotyping, 'chlorophyll_index');
+    const chlorophyll = getPhenotypingValue(phenotyping, 'chlorophyll_index');
     if (chlorophyll !== null) return { value: clampValue(chlorophyll, 0, 10) };
 
     const meanR = getNumericValue(metrics.mean_r);
@@ -656,6 +682,16 @@ const deriveCompareMetricValue = (
       const normalizedColorIndex = (meanG - meanR) / (meanG + meanR + meanB + COLOR_BALANCE_EPSILON);
       const mappedChlorophyll = clampValue((normalizedColorIndex + 1) * 5, 0, 10);
       return { value: mappedChlorophyll, estimated: true, tooltip: 'Klorofil değeri RGB normalize indeksten tahmin edildi.' };
+    }
+
+    const rgRatio = getNumericValue(metrics.rg_ratio);
+    if (rgRatio !== null && rgRatio > 0) {
+      return { value: clampValue(1 / rgRatio, 0, 10), estimated: true, tooltip: 'Klorofil indeksi R/G oranının tersiyle tahmin edildi.' };
+    }
+
+    const stressRatio = estimateStressRatio();
+    if (stressRatio !== null) {
+      return { value: clampValue(4.8 - stressRatio * 3.8, 0, 10), estimated: true, tooltip: 'Klorofil indeksi stres sinyallerinden yaklaşık tahmin edildi.' };
     }
     return { value: null };
   }
