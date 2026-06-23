@@ -509,9 +509,9 @@ class ImagePreprocessor:
             'brightness_std': float(std_brightness),
             'underexposed_ratio': float(underexposed_ratio),
             'overexposed_ratio': float(overexposed_ratio),
-            'is_dark': mean_brightness < 60,
-            'is_bright': mean_brightness > 200,
-            'is_low_contrast': std_brightness < 40,
+            'is_dark': bool(mean_brightness < 60),
+            'is_bright': bool(mean_brightness > 200),
+            'is_low_contrast': bool(std_brightness < 40),
             'recommendation': []
         }
         
