@@ -23,6 +23,14 @@ interface UploadFileModel {
   parsedMeta: ParsedExperimentMeta;
 }
 
+interface ProcessingFileError {
+  filename?: string;
+  error?: string;
+  step?: string;
+  details?: unknown;
+  remediation?: string;
+}
+
 const toIsoTimestamp = (date: Date) => date.toISOString();
 
 const parseExperimentMetaFromFilename = (filename: string): ParsedExperimentMeta => {
@@ -86,6 +94,22 @@ const suggestedDatedFilename = (filename: string) => {
   return `${baseName}_YYYY-MM-DD${extension}`;
 };
 
+const defaultProcessingRemediation = 'Verify image contrast and sample density in the uploaded series.';
+
+const dataTransferRemediation = 'Görüntü verisi aktarımı/formatı kontrol edilmeli; dosya adını kısaltın, dosyanın bozulmadığını ve desteklenen TIFF/PNG/JPG formatında yeniden aktarıldığını doğrulayın.';
+
+const isDataTransferFailure = (fileError?: ProcessingFileError) => {
+  if (!fileError) return false;
+
+  return fileError.step === 'critical' || /file name too long/i.test(fileError.error ?? '');
+};
+
+const remediationForFileError = (fileError?: ProcessingFileError) => {
+  if (fileError?.remediation) return fileError.remediation;
+
+  return isDataTransferFailure(fileError) ? dataTransferRemediation : defaultProcessingRemediation;
+};
+
 const fileDateMetadata = (file: File) => {
   const detectedTimestamp = timestampFromFilename(file.name);
 
@@ -114,7 +138,7 @@ export default function UploadPanel({ onComplete }: UploadPanelProps) {
   const [progress, setProgress] = useState(0);
   const [pipelineStage, setPipelineStage] = useState<string>('queued');
   const [currentFile, setCurrentFile] = useState<string>('');
-  const [error, setError] = useState<{ message: string; remediation?: string; fileErrors?: Array<{ filename?: string; error?: string; step?: string; details?: unknown; remediation?: string }> } | null>(null);
+  const [error, setError] = useState<{ message: string; remediation?: string; fileErrors?: ProcessingFileError[] } | null>(null);
   const [actionState, setActionState] = useState<SegmentationActionState>('idle');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
@@ -267,10 +291,13 @@ export default function UploadPanel({ onComplete }: UploadPanelProps) {
             setToastMessage('Segmentasyon işlemi başarıyla tamamlandı.');
           } else if (statusData.status === 'failed') {
             clearInterval(poll);
-            const fileErrors = Array.isArray(statusData.results?.errors) ? statusData.results.errors : [];
+            const fileErrors: ProcessingFileError[] = Array.isArray(statusData.results?.errors) ? statusData.results.errors : [];
+            const firstFileError = fileErrors[0];
+            const firstFileRemediation = remediationForFileError(firstFileError);
+
             setError({
-              message: statusData.error || 'Pipeline execution failed.',
-              remediation: 'Verify image contrast and sample density in the uploaded series.',
+              message: statusData.error || firstFileError?.error || 'Pipeline execution failed.',
+              remediation: firstFileRemediation,
               fileErrors
             });
             setIsUploading(false);
@@ -582,7 +609,7 @@ export default function UploadPanel({ onComplete }: UploadPanelProps) {
                     <span className="font-black">{fileError.filename || `Dosya ${index + 1}`}</span>
                     <span className="block opacity-80">{fileError.error || 'Bilinmeyen hata'}</span>
                     {fileError.step && <span className="block opacity-60">Adım: {fileError.step}</span>}
-                    {fileError.remediation && <span className="block italic opacity-70">{fileError.remediation}</span>}
+                    <span className="block italic opacity-70">{remediationForFileError(fileError)}</span>
                   </li>
                 ))}
               </ul>
